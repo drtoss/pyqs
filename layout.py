@@ -36,16 +36,32 @@ def layout(config, rows, skip = 0, no_hdr = False):
     # Figure out how many header lines we'll need.
     hdrrows = config.bottom_just_titles()
     hdrcnt = len(hdrrows)
-    print(repr(hdrrows))
     # And how many fields
     fldcnt = len(config.config)
-    # Compute maximum widths of title/dash/data values for
-    # each column.
-    dashrows = [x['df'] for x in config.config]
-    maxw = list()
-    maxw = config.layout_max(maxw, hdrrows)
-    maxw = config.layout_max(maxw, dashrows)
-    maxw = config.layout_max(maxw, rows, skip)
+    # Compute widths of title/dash/data values for
+    # each column. Start with the configured
+    # minimum widths, possibly increase that for
+    # wider values, then impose maxw limits.
+    dashrows = [x.df for x in config.config]
+    colw = [x.minw for x in config.config]
+    config.layout_max(colw, hdrrows)
+    config.layout_max(colw, dashrows)
+    config.layout_max(colw, rows, skip)
+    for i in range(len(colw)):
+        t = config.config[i].maxw
+        if t >= 0 and t < colw[i]:
+            colw[i] = config.config[i].maxw
+    print(colw)
+    # Layout headers
+    result = []
+    for row in hdrrows:
+        line = ''
+        for i in range(len(colw)):
+            fs = config.config[i]
+            fval = layout_field(fs.hj, fs.hf, colw[i], row[i])
+            line += fval + fs.hs
+        result.append(line)
+    return result
 
 class Config(object):
     def __init__(self):
@@ -146,30 +162,105 @@ class Config(object):
             rows.append(flds)
         return rows
 
-    def layout_max(self, maxw, rows, skip = 0):
+    def layout_max(self, colw, rows, skip = 0):
         '''Compute max widths needed for each column
 
         Args:
-            maxw = list to contain column widths
+            colw = list to contain column widths
             rows = list of lists of column values
             skip = number of fields to skip in rows
         Exit:
-            maxw updated
+            colw updated
         '''
         fldcnt = len(rows[0])
-        if len(maxw) == 0:
-            maxw = [0 for x in range(fldcnt)]
+        if len(colw) == 0:
+            for i in range(fldcnt):
+                colw.append(0)
         for row in rows:
             for i in range(fldcnt):
-                maxw[i] = max([len(x) for x in row[skip:])
+                t = len(row[i+skip])
+                if t > colw[i]:
+                    colw[i] = t
+
+def layout_field(just, fill, width, value):
+    '''layout one field's value
+
+    Args:
+        just = justification
+        fill = fill character/string
+        width = field width to justify within
+        value = text value to layout
+    Returns:
+        string with value laid out
+    '''
+    def leftmost(s, n):
+        return s[0:min(n, len(s))]
+    def rightmost(s, n):
+        return s[max(0, len(s) - n):]
+    def centermost(s, n):
+        sl = len(s)
+        if n > sl:
+            return s
+        f = (sl - n) // 2
+        l = f + n
+        return s[f:l]
+
+    if width == 0:
+        return ''
+    # Determine how much fill is needed
+    vlen = len(value)
+    if (fill == ''): fill = ' ' # Protect from empty fill
+    fplen = len(fill)           # Len of fill pattern
+    flen = width - vlen         # Amount of fill needed
+    # Convert lr justification to either l or r based on value
+    if just == 'lr':
+        just = 'r' if value.startswith(' ') else 'l'
+    # Set left fill, right fill and value
+    if flen < 0:
+        # No fill needed
+        lfill = ''
+        rfill = ''
+        if just == 'l':
+            result = leftmost(value, width)
+        elif just == 'r':
+            result = rightmost(value, width)
+        elif just == 'c':
+            result = centermost(value, width)
+        else:
+            result = leftmost(value, width)
+    else:
+        result = value
+        flm1 = flen - 1
+        reps = (flen + fplen - 1) // fplen
+        filler = fill * reps
+        if just == 'l':
+            lfill = ''
+            rfill = rightmost(filler, flen)
+        elif just == 'r':
+            lfill = leftmost(filler, flen)
+            rfill = ''
+        elif just == 'c':
+            halff = flen // 2
+            lfill = leftmost(filler, halff)
+            rfill = rightmost(filler, flen - halff)
+        else:
+            lfill = ''
+            rfill = rightmost(filler, flen)
+    return lfill + result + rfill
 
 def test():
     c = Config()
     c.add_field('fld1')
     c.add_field('fld2', maxw = 3, hj = 'r', hs = '|', rf = '0')
     c.add_field(['fld3', 'cont'], df = '+=', hj = 'r', hs = '')
-    layout(c, [['tom', '0', 'one'], ['dick', '1', 'two'],
-        ['harry', 1234, 'three']])
+    r = layout(c, [['tom', '0', 'one'], ['dick', '1', 'two'],
+        ['harry', '1234', 'three']])
+    print(r)
+    print(layout_field('l', '--', 10, 'abc'))
+    print(layout_field('c', '.', 10, 'abc'))
+    print(layout_field('c', '.', 5, 'abcdefg'))
+    print(layout_field('r', '.', 5, 'abcdefg'))
+    print(layout_field('r', '.', 10, 'abcdefg'))
 
 
 if __name__ == '__main__':
