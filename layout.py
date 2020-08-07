@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 """
 """
-def layout(config, rows, skip = 0, no_hdr = False):
+
+def layout(config, rows, skip = 0, show_hdr = True):
     '''Layout data for printing
 
     Given a configuration and a list of rows of field values,
@@ -14,7 +15,7 @@ def layout(config, rows, skip = 0, no_hdr = False):
         rows = list of row values, each row is a list of field
             values.
         skip = number of leading rows to ignore
-        no_hdr = True to skip headers
+        show_hdr = False to skip headers
 
     Returns:
         A list of lines of formatted data
@@ -30,8 +31,12 @@ def layout(config, rows, skip = 0, no_hdr = False):
             ['harry', 1234, 'three']])
 
       produces:
-        [
-        ]
+      ['         | fld3',
+       'fld1  ld2| cont',
+       '----- ---|+=++=',
+       'tom   000|  one',
+       'dick  001|  two',
+       'harry 234|three']
 '''
     # Figure out how many header lines we'll need.
     hdrrows = config.bottom_just_titles()
@@ -42,25 +47,43 @@ def layout(config, rows, skip = 0, no_hdr = False):
     # each column. Start with the configured
     # minimum widths, possibly increase that for
     # wider values, then impose maxw limits.
-    dashrows = [x.df for x in config.config]
+    dashrow = [x.df for x in config.config]
     colw = [x.minw for x in config.config]
     config.layout_max(colw, hdrrows)
-    config.layout_max(colw, dashrows)
+    config.layout_max(colw, [dashrow])
     config.layout_max(colw, rows, skip)
-    for i in range(len(colw)):
+    for i in range(fldcnt):
         t = config.config[i].maxw
         if t >= 0 and t < colw[i]:
             colw[i] = config.config[i].maxw
     print(colw)
     # Layout headers
     result = []
-    for row in hdrrows:
+    if show_hdr:
+        for row in hdrrows:
+            line = ''
+            for i in range(fldcnt):
+                fs = config.config[i]
+                fval = layout_field(fs.hj, fs.hf, colw[i], row[i])
+                line += fval + fs.hs
+            result.append(line)
+        # Layout horizontal separator line
+        if config.config[0].df != '':
+            line = ''
+            for i in range(fldcnt):
+                fs = config.config[i]
+                fval = layout_field(fs.dj, fs.df, colw[i], dashrow[i])
+                line += fval + fs.ds
+            result.append(line)
+    # Layout data rows
+    for row in rows:
         line = ''
-        for i in range(len(colw)):
+        for i in range(fldcnt):
             fs = config.config[i]
-            fval = layout_field(fs.hj, fs.hf, colw[i], row[i])
-            line += fval + fs.hs
+            fval = layout_field(fs.rj, fs.rf, colw[i], row[skip+i])
+            line += fval + fs.rs
         result.append(line)
+
     return result
 
 class Config(object):
@@ -100,10 +123,11 @@ class Config(object):
             self.rf = rf
             self.rj = rj
             self.rs = rs
+
     def add_field(self, title, **kwargs):
         '''Add settings for one field to config.
 
-        The settings are contained in a _fieldspec object.
+        The settings are contained in a fieldspec object.
 
         Args:
             title = title of field. If the title is a list,
@@ -249,18 +273,24 @@ def layout_field(just, fill, width, value):
     return lfill + result + rfill
 
 def test():
+    print(layout_field('l', '--', 10, 'abc'))
+    print(layout_field('l', '--', 5, 'abcdefg'))
+    print(layout_field('c', '.', 10, 'abc'))
+    print(layout_field('c', '.', 11, 'abc'))
+    print(layout_field('c', '.', 10, 'abcd'))
+    print(layout_field('c', '.', 11, 'abcd'))
+    print(layout_field('c', '.', 5, 'abcdefg'))
+    print(layout_field('r', '.', 5, 'abcdefg'))
+    print(layout_field('r', '.', 10, 'abcdefg'))
+
     c = Config()
     c.add_field('fld1')
     c.add_field('fld2', maxw = 3, hj = 'r', hs = '|', rf = '0')
     c.add_field(['fld3', 'cont'], df = '+=', hj = 'r', hs = '')
     r = layout(c, [['tom', '0', 'one'], ['dick', '1', 'two'],
         ['harry', '1234', 'three']])
-    print(r)
-    print(layout_field('l', '--', 10, 'abc'))
-    print(layout_field('c', '.', 10, 'abc'))
-    print(layout_field('c', '.', 5, 'abcdefg'))
-    print(layout_field('r', '.', 5, 'abcdefg'))
-    print(layout_field('r', '.', 10, 'abcdefg'))
+    print('\n'.join(r))
+    print(repr(r))
 
 
 if __name__ == '__main__':
