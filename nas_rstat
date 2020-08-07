@@ -1,0 +1,189 @@
+#!/usr/bin/python3
+# $Header:$
+#Author:dtalcott
+#Purpose:Python equivalent of pbs_rstat, but with options for how
+#Purpose:to display the output.
+#Purpose:Use --help for details.
+#Last-modified: $Author: dtalcott $ on $Date: 2020/06/13 12:09:40 $
+#Reviewed-by: 
+#Reviewed-on: 
+
+import sys
+import os
+import argparse
+import re
+import subprocess
+import time
+
+PBS_EXEC = os.environ.get('PBS_EXEC', '/PBS')
+sys.path.append('/PBS_new/lib/site')
+sys.path.append(os.path.join(PBS_EXEC, 'lib', 'site'))
+
+import pbs_ifl as ifl
+from utils import BatchUtils
+import layout
+
+long_desc = '''Display information about reservations
+
+This command displays information about PBS reservations. It is similar
+to pbs_rstat, but accepts field selections similarly to NAS's qstat.
+'''
+
+verbose = 0
+args = None
+default_fields = ['name', 'queue', 'user', 'state', 'start', 'duration', 'end']
+field_list = []
+
+def main():
+    global verbose, args, field_list
+    # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
+    for i in range(1, 30):
+        try:
+            signal.signal(i, signal.SIG_DFL)
+        except:
+            pass
+    prog = sys.argv[0].split('/')[-1]
+    parser = argparse.ArgumentParser(description=long_desc, prog=prog,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('-B', default=False, action='store_true',
+        help='brief output: just reservation IDs')
+    parser.add_argument('-F', '-f', default=False, action='store_true',
+        help='request full details')
+    parser.add_argument('-S', default=False, action='store_true',
+        help='request short output (default)')
+    parser.add_argument('--verbose', '-v', default=0, action='count',
+        help='increase debugging verbosity')
+    parser.add_argument('--version', action='version',
+        version='%(prog)s $Id:$')
+    parser.add_argument('-W', action='append',
+        help='options affecting field selection and disply. See qstat.1B')
+    parser.add_argument('resvids', nargs=argparse.REMAINDER,
+        help='reservations to list')
+
+    args = parser.parse_args()
+
+    verbose = args.verbose
+    levels = 0
+    if args.B: levels += 1
+    if args.F: levels += 1
+    if args.S: levels += 1
+    if (levels > 1):
+        print("Use only one of B, F, S, f", file=sys.stderr)
+        return 1
+    # Build list of known fields
+    field_list = gen_field_list()
+    # Handle -W options
+    (field_list, attr_list) = collect_fields(default_fields, args.W)
+    format_list = adjust_formats(field_list, args.W)
+    # Collect the info
+    resvs = get_resv_info(args.resvids, attr_list)
+    # Display it
+    if args.B:
+        display_brief(resvs, field_list)
+    elif args.F:
+        display_full(resvs, field_list)
+    else:
+        display_standard(resvs, field_list)
+    return 0
+
+def collect_fields(df, W):
+    '''Generate list of fields
+
+    Args:
+        df = list of names of default fields
+        W = list of -W arguments, if any
+    Globals:
+        field_list = List of info about known fields
+    Returns:
+        (fl, aset) where
+L           fl = list of field_info dictionaries describing field selected
+                for display
+            aset = set of PBS attributes holding data for fields in fl
+    '''
+    global field_list, verbose
+    fl = df
+    aset = set()
+    if W is None:
+        W = []
+    for opt in W:
+        # Only interested in changes to list of fields
+        mo = re.match(r'o=([+-]?).*', opt)
+        if not mo:
+            continue
+        plusminus = mo.group(1)
+        names = mo.group(2).split(',')
+        if plusminus == '-':
+            for name in names:
+                name = name.strip()
+                while name in fl:
+                    del fl[name]
+        else:
+            for name in names:
+                fl.append(name.strip())
+    # Now, validate fields and constuct results
+    knowns = set([x['name'] for x in field_list])
+    requested = set(fl)
+    unknowns = requested.difference(knowns)
+    if unknowns:
+        plural = 's' if len(unknowns) > 1 else ''
+        print("Unknown field name%s: %s" % (plural, ', '.join(sorted(unknowns))),
+            file=sys.stderr)
+        print("Known fields are: %s" % ', '.join(sorted(knowns)),
+            file=sys.stderr)
+    fil = filter(lambda x: x['name'] in requested, field_list)
+    aset = set([x['sources'] for x in fil])
+    if verbose:
+        print("Need these attributes: %s" % ', '.join(sorted(aset)))
+    return (fil, aset)
+
+def gen_field_list():
+    '''Generate list of known field
+
+    Returns: list of field_info dicts for known fields
+    The dict have these key/value pairs
+        name: the name of the field
+        format: dict suitable for passing to layout.add_field()
+        func: name of function to calculate display value
+        sources: reservation attributes whose values are needed by func
+    '''
+    fl = []
+    fl.append(gen_field('name', 'Name', None, 'get_name', 'Reserve_Name'))
+    fl.append(gen_field('queue', 'Queue', None, 'get_by_name', 'queue'))
+    fl.append(gen_field('user', 'User', None, 'get_owner', 'Reserve_Owner'))
+    fl.append(gen_field('state', 'State', None, 'get_state', 'reserve_state'))
+    fl.append(gen_field('start', 'Start', {'hj':'r'}, 'get_date', 'reserve_start'))
+    fl.append(gen_field('duration', 'Duration', {'hj':'r'}, 'get_duration', 'reserve_duration'))
+    fl.append(gen_field('end', 'End', None, 'get_date', 'reserve_end'))
+    fl.append(gen_field('users', 'Users', None, 'get_users', 'Authorized_Groups'))
+    fl.append(gen_field('groups', 'Groups', None, 'get_groups', 'Authorized_Users'))
+    fl.append(gen_field('nodes', 'Nodes', None, 'get_nodes', 'resv_nodes'))
+    return fl
+
+def gen_field(name, title, form, func, source):
+    '''Create a field_info dict
+
+    Args:
+        name = name of field
+        title = display title for field
+        form = dictionary of non-default formatting options for field
+        func = name of function to calculate display value of field
+        source = PBS attributes used to by func
+    '''
+    if form is None:
+        form = {}
+    if func is None:
+        func = 'get_by_name'
+    if source is None:
+        source = []
+    form['title'] = title
+    fi = {'name': name,
+        'format': form,
+        'func': func,
+        'sources': source
+        }
+    return fi
+
+if __name__ == '__main__':
+    sys.exit(main())
+
+# vi:ts=4:sw=4:expandtab
