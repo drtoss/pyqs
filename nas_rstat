@@ -29,6 +29,7 @@ This command displays information about PBS reservations. It is similar
 to pbs_rstat, but accepts field selections similarly to NAS's qstat.
 '''
 
+pbs_conf = ifl.cvar.pbs_conf
 verbose = 0
 args = None
 default_fields = ['name', 'queue', 'user', 'state', 'start', 'duration', 'end']
@@ -73,11 +74,17 @@ def main():
         return 1
     # Build list of known fields
     known_fields = gen_field_list()
+    opts_W = args.W
+    if opts_W is None:
+        opts_W = list()
     # Handle -W options
-    (field_list, attr_list) = collect_fields(default_fields, args.W)
-    if not adjust_formats(field_list, args.W):
+    (field_list, attr_list) = collect_fields(default_fields, opts_W)
+    if not adjust_formats(field_list, opts_W):
         sys.exit(1)
     # Collect the info
+    if (ifl.pbs_loadconf(0) == 0):
+        print("Cannot get PBS configuration information", file=sys.stderr)
+        return 1
     resvs = get_resv_info(args.resvids, attr_list)
     # Display it
     if args.B:
@@ -248,7 +255,36 @@ def gen_field(name, title, form, func, source):
     return fi
 
 def get_resv_info(resvids, attr_list):
-    sys.exit(-1)
+    '''Ask server for info about reservations
+
+    Args:
+        resvids = list of reservation IDs
+        attr_list = list of interesting attributes.
+    Returns:
+        List of PBS batchstatus results
+    '''
+    bu = BatchUtils()
+    atl = bu.list_to_attrl(list(attr_list))
+    # XXX
+    conn = ifl.pbs_connect('localhost')
+    bs = list()
+    if conn < 0:
+        print("Cannot connect to PBS server: %s" % ifl.pbs_Errno(),
+            file = sys.stderr)
+        return None
+    if resvids == None or len(resvids) == 0:
+        # Ask for all reservations
+        bs = ifl.pbs_statresv(conn, None, atl, None)
+    else:
+        for resid in resvids:
+            print(resid)
+            bs1 = ifl.pbs_statresv(conn, resid, atl, None)
+            print(ifl.pbs_Errno())
+            print(bs1)
+            bs.extend(bs1)
+    ifl.pbs_disconnect(conn)
+    print (bs)
+    return bs
 
 if __name__ == '__main__':
     sys.exit(main())
