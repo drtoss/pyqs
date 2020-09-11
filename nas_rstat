@@ -13,6 +13,7 @@ import os
 import argparse
 import re
 import subprocess
+import socket
 import time
 
 PBS_EXEC = os.environ.get('PBS_EXEC', '/PBS')
@@ -134,7 +135,7 @@ def adjust_formats(fl, W):
         # Is it our kind of W option?
         mo = re.match(r'fmt_(\w+)=(.+)', wopt)
         if not mo:
-            print("rejecting %s" % wopt)
+            print("rejecting %s" % wopt, file=sys.stderr)
             continue
         # Do we care about it?
         name = mo.group(1)
@@ -265,26 +266,118 @@ def get_resv_info(resvids, attr_list):
     '''
     bu = BatchUtils()
     atl = bu.list_to_attrl(list(attr_list))
-    # XXX
-    conn = ifl.pbs_connect('localhost')
     bs = list()
-    if conn < 0:
-        print("Cannot connect to PBS server: %s" % ifl.pbs_Errno(),
-            file = sys.stderr)
-        return None
     if resvids == None or len(resvids) == 0:
         # Ask for all reservations
+        conn = ifl.pbs_connect(None)
+        if conn < 0:
+            print("Cannot connect to PBS server: %s" % ifl.pbs_Errno(),
+                file = sys.stderr)
+            return None
         bs = ifl.pbs_statresv(conn, None, atl, None)
     else:
+        cur_server = None
+        conn = None
         for resid in resvids:
-            print(resid)
-            bs1 = ifl.pbs_statresv(conn, resid, atl, None)
-            print(ifl.pbs_Errno())
-            print(bs1)
+            (seq_no, server) = get_server(resid)
+            if seq_no == None:
+                print("Invalid request id:", resid, file=sys.stderr)
+                continue
+            if server == None:
+                server = pbs_conf.pbs_server_name
+            if server != cur_server:
+                if conn != None:
+                    ifl.pbs_disconnect(conn)
+                    cur_server = None
+                conn = ifl.pbs_connect(server)
+                if conn < 0:
+                    print("Cannot connect to PBS server %s: %s" % \
+                        (server, ifl.pbs_Errno()))
+                    break
+                cur_server = server
+            bs1 = ifl.pbs_statresv(conn, seq_no, atl, None)
+            if verbose > 1:
+                print(bs1)
             bs.extend(bs1)
     ifl.pbs_disconnect(conn)
-    print (bs)
+    if verbose > 1:
+        print (bs)
     return bs
+
+def get_server(job_id):
+    '''Split job ID into its pieces
+
+    Also works for reservations.
+    Args:
+        job_id = job id in one of its various forms
+    Returns:
+        (job_id, server) tuple
+        job_id will be None on error
+    Based on C routine by the same name.
+    '''
+    job_id = job_id.strip()
+    if job_id.startswith('@'):
+        return (None, job_id[1:])
+    server_out = None
+    pbs_server_name = pbs_conf.pbs_server_name
+    (seq_num, parent_server, current_server) = parse_jobid(job_id)
+    if seq_num == None:
+        return (None, None)
+    if current_server:
+        server_out = current_server
+    job_id_out = seq_num
+    if parent_server:
+        if pbs_server_name:
+            s = parent_server.lower()
+            t = pbs_server_name.lower()
+            if s == t:
+                job_id_out = job_id_out + '.' + pbs_server_name
+                return (job_id_out, server_out)
+            try:
+                (hname, alias, ipaddr) = socket.gethostbyname_ex(parent_server)
+                parent_server = hname
+            except:
+                pass
+            job_id_out = job_id_out + '.' + parent_server
+            if not server_out:
+                server_out = parent_server
+            return (job_id_out, server_out)
+    if not pbs_server_name:
+        return (None, None)
+    job_id_out = job_id_out + '.' + pbs_server_name
+    return (job_id_out, server_out)
+
+def parse_jobid(job_id):
+    '''Split job ID into its pieces
+
+    Also works for reservations.
+    Args:
+        job_id = job id in one of its various forms
+    Returns:
+        (seq_num, parent_server, current_server) where
+            seq_num = numeric part of job id
+            parent_server = hostname where job submitted
+            current_server = server currently holding job
+    Based on C routine of the same name
+    '''
+    job_re = r'(?P<seq_no>\d+(\[\d*\])?)(\.(?P<parent>[^@]*))?(@(?P<current>.+))?'
+    resv_re = r'(?P<seq_no>[MRS]\d+)(\.(?P<parent>[^@]*))?(@(?P<current>.+))?'
+    job_id = job_id.strip()
+    if job_id[0].isdigit():
+        mo = re.match(job_re, job_id)
+        if not mo:
+            return (None, None, None)
+        seq_no = mo.group('seq_no')
+        parent = mo.group('parent')
+        current = mo.group('current')
+        return (seq_no, parent, current)
+    mo = re.match(resv_re, job_id)
+    if not mo:
+        return (None, None, None)
+    seq_no = mo.group('seq_no')
+    parent = mo.group('parent')
+    current = mo.group('current')
+    return (seq_no, parent, current)
 
 if __name__ == '__main__':
     sys.exit(main())
