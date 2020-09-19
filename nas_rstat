@@ -132,6 +132,8 @@ def adjust_formats(fl, W):
 
     errcnt = 0
     for wopt in W:
+        if wopt.startswith('o='):
+            continue
         # Is it our kind of W option?
         mo = re.match(r'fmt_(\w+)=(.+)', wopt)
         if not mo:
@@ -155,6 +157,7 @@ def adjust_formats(fl, W):
         # Discard empty junk
         if opts[-1] == '':
             opts.pop()
+        # XXX Need to merge opts into fl[idx] format stuff.
     if errcnt:
         return False
     return True
@@ -184,7 +187,9 @@ L           fl = list of field_info dictionaries describing field selected
             continue
         plusminus = mo.group(1)
         names = mo.group(2).split(',')
-        if plusminus == '-':
+        if plusminus == '':
+            fl = [n.strip() for n in names]
+        elif plusminus == '-':
             for name in names:
                 name = name.strip()
                 while name in fl:
@@ -193,7 +198,8 @@ L           fl = list of field_info dictionaries describing field selected
             for name in names:
                 fl.append(name.strip())
     # Now, validate fields and constuct results
-    knowns = set([x['name'] for x in known_fields])
+    knownmap = dict([[x['name'], x] for x in known_fields])
+    knowns = set(knownmap.keys())
     requested = set(fl)
     unknowns = requested.difference(knowns)
     if unknowns:
@@ -202,14 +208,37 @@ L           fl = list of field_info dictionaries describing field selected
             file=sys.stderr)
         print("Known fields are: %s" % ', '.join(sorted(knowns)),
             file=sys.stderr)
-    fil = list(filter(lambda x: x['name'] in requested, known_fields))
+    fil = [knownmap[x] for x in fl]
     aset = set(list([x['sources'] for x in fil]))
     if verbose:
         print("Need these attributes: %s" % ', '.join(sorted(aset)))
     return (fil, aset)
 
+def display_standard(resvs, field_list):
+    '''Output info in standard format
+
+    For each reservation, generate a list of display values for each
+    selected field. Collect those lists into a list and pass it to
+    layout for display.
+    Args:
+        resvs = list of info for reservations
+        field_list = desired fields to display
+    '''
+    c = layout.Config()
+    for fld in field_list:
+        title = fld['title']
+        if not title:
+            title = fld['name']
+        c.add_field(title, **fld['format'])
+    rows = list()
+    for resv in resvs:
+        row = [globals()[f['func']](f, resv) for f in field_list]
+        rows.append(row)
+    res = layout.layout(c, rows)
+    print('\n'.join(res))
+
 def gen_field_list():
-    '''Generate list of known field
+    '''Generate list of known fields
 
     Returns: list of field_info dicts for known fields
     The dict have these key/value pairs
@@ -219,16 +248,16 @@ def gen_field_list():
         sources: reservation attributes whose values are needed by func
     '''
     fl = []
-    fl.append(gen_field('name', 'Name', None, 'get_name', 'Reserve_Name'))
+    fl.append(gen_field('name', 'Name', None, 'get_by_attr', 'Reserve_Name'))
     fl.append(gen_field('queue', 'Queue', None, 'get_by_name', 'queue'))
-    fl.append(gen_field('user', 'User', None, 'get_owner', 'Reserve_Owner'))
-    fl.append(gen_field('state', 'State', None, 'get_state', 'reserve_state'))
+    fl.append(gen_field('user', 'User', None, 'get_by_attr', 'Reserve_Owner'))
+    fl.append(gen_field('state', 'State', None, 'get_by_attr', 'reserve_state'))
     fl.append(gen_field('start', 'Start', {'hj':'r'}, 'get_date', 'reserve_start'))
     fl.append(gen_field('duration', 'Duration', {'hj':'r'}, 'get_duration', 'reserve_duration'))
     fl.append(gen_field('end', 'End', None, 'get_date', 'reserve_end'))
-    fl.append(gen_field('users', 'Users', None, 'get_users', 'Authorized_Groups'))
-    fl.append(gen_field('groups', 'Groups', None, 'get_groups', 'Authorized_Users'))
-    fl.append(gen_field('nodes', 'Nodes', None, 'get_nodes', 'resv_nodes'))
+    fl.append(gen_field('groups', 'Groups', None, 'get_by_attr', 'Authorized_Groups'))
+    fl.append(gen_field('users', 'Users', None, 'get_by_attr', 'Authorized_Users'))
+    fl.append(gen_field('nodes', 'Nodes', None, 'get_by_attr', 'resv_nodes'))
     return fl
 
 def gen_field(name, title, form, func, source):
@@ -246,9 +275,9 @@ def gen_field(name, title, form, func, source):
     if func is None:
         func = 'get_by_name'
     if source is None:
-        source = []
-    form['title'] = title
+        source = ''
     fi = {'name': name,
+        'title': title,
         'format': form,
         'func': func,
         'sources': source
@@ -265,6 +294,7 @@ def get_resv_info(resvids, attr_list):
         List of PBS batchstatus results
     '''
     bu = BatchUtils()
+    attr_list = (','.join(attr_list)).split(',')
     atl = bu.list_to_attrl(list(attr_list))
     bs = list()
     if resvids == None or len(resvids) == 0:
@@ -346,6 +376,40 @@ def get_server(job_id):
         return (None, None)
     job_id_out = job_id_out + '.' + pbs_server_name
     return (job_id_out, server_out)
+
+# Functions to compute specific values for display
+# get_xxx(fi, rinfo)
+# Args:
+#   fi = field info
+#   rinfo = reservation info
+
+def get_by_attr(fi, rinfo):
+    attr_name = fi['sources']
+    return get_by_name(fi, rinfo, attr_name)
+
+def get_by_name(fi, rinfo, name=None):
+    if name == None:
+        name = fi['name']
+    if name in rinfo:
+        result = rinfo[name]
+    else:
+        t = 'Resource_List.' + name
+        if t in rinfo:
+            result = rinfo[t]
+        else:
+            result = '--'
+    return result
+
+def get_date(fi, rinfo):
+    # XXX
+    return get_by_attr(fi, rinfo)
+
+def get_duration(fi, rinfo):
+    # XXX
+    return get_by_attr(fi, rinfo)
+
+def get_name(fi, rinfo):
+    return rinfo['Reserve_Name']
 
 def parse_jobid(job_id):
     '''Split job ID into its pieces
