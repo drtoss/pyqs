@@ -56,32 +56,37 @@ def layout(config, rows, skip = 0, show_hdr = True):
         t = config.config[i].maxw
         if t >= 0 and t < colw[i]:
             colw[i] = config.config[i].maxw
-    print(colw)
     # Layout headers
     result = []
     if show_hdr:
         for row in hdrrows:
             line = ''
+            sep = ''
             for i in range(fldcnt):
                 fs = config.config[i]
                 fval = layout_field(fs.hj, fs.hf, colw[i], row[i])
-                line += fval + fs.hs
+                line += sep + fval
+                sep = fs.hs
             result.append(line)
         # Layout horizontal separator line
         if config.config[0].df != '':
             line = ''
+            sep = ''
             for i in range(fldcnt):
                 fs = config.config[i]
                 fval = layout_field(fs.dj, fs.df, colw[i], dashrow[i])
-                line += fval + fs.ds
+                line += sep + fval
+                sep = fs.ds
             result.append(line)
     # Layout data rows
     for row in rows:
         line = ''
+        sep = ''
         for i in range(fldcnt):
             fs = config.config[i]
             fval = layout_field(fs.rj, fs.rf, colw[i], row[skip+i])
-            line += fval + fs.rs
+            line += sep + fval
+            sep = fs.rs
         result.append(line)
 
     return result
@@ -138,7 +143,7 @@ class Config(object):
                             (default -)
             dj = dashjust   Justification for dashfill
                             (default, hj)
-            ds = dashseparator Character between this file and
+            ds = dashseparator Character between this field and
                             the next
                             (default, hs)
             hf = headerfill String to fill header text to width
