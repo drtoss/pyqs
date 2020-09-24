@@ -123,8 +123,8 @@ class Config(object):
             self.hf = hf
             self.hj = hj
             self.hs = hs
-            self.maxw = maxw
-            self.minw = minw
+            self.maxw = int(maxw)
+            self.minw = int(minw)
             self.rf = rf
             self.rj = rj
             self.rs = rs
