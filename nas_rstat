@@ -81,7 +81,7 @@ def main():
     # Handle -W options
     (field_list, attr_list) = collect_fields(default_fields, opts_W)
     if not adjust_formats(field_list, opts_W):
-        sys.exit(1)
+        return 1
     # Collect the info
     if (ifl.pbs_loadconf(0) == 0):
         print("Cannot get PBS configuration information", file=sys.stderr)
@@ -118,8 +118,11 @@ def adjust_formats(fl, W):
         W = -W options from command line
     Returns: True if no errors, else False
     '''
+    # First build parser that recognizes -W fmt_xxx=-key value -key value
     import pyparsing as pp
-    quoted_string = pp.sglQuotedString() | pp.dblQuotedString() | \
+    quoted_string = \
+            pp.QuotedString(quoteChar = '"', endQuoteChar = '"') | \
+            pp.QuotedString(quoteChar = "'", endQuoteChar = "'") | \
             pp.QuotedString(quoteChar = '{', endQuoteChar = '}')
     title = pp.Word(pp.alphanums) | quoted_string
     value = pp.Word(pp.alphanums) | quoted_string
@@ -130,6 +133,7 @@ def adjust_formats(fl, W):
     settings = pp.Optional(title('title')) + option_list + \
         pp.Optional(junk('junk'))
 
+    # Now apply it to appropriate -W options
     errcnt = 0
     for wopt in W:
         if wopt.startswith('o='):
@@ -157,7 +161,14 @@ def adjust_formats(fl, W):
         # Discard empty junk
         if opts[-1] == '':
             opts.pop()
-        # XXX Need to merge opts into fl[idx] format stuff.
+        # Check for new field title
+        if len(opts) % 2:
+            fl[idx]['title'] = opts.pop(0).split()
+        # Merge in new format options
+        for i in range(0, len(opts), 2):
+            key = opts[i]
+            val = opts[i+1]
+            fl[idx]['format'][key] = val
     if errcnt:
         return False
     return True
@@ -234,8 +245,9 @@ def display_standard(resvs, field_list):
     for resv in resvs:
         row = [globals()[f['func']](f, resv) for f in field_list]
         rows.append(row)
-    res = layout.layout(c, rows)
-    print('\n'.join(res))
+    if rows:
+        res = layout.layout(c, rows)
+        print('\n'.join([x.rstrip() for x in res]))
 
 def gen_field_list():
     '''Generate list of known fields
@@ -329,7 +341,8 @@ def get_resv_info(resvids, attr_list):
             if verbose > 1:
                 print(bs1)
             bs.extend(bs1)
-    ifl.pbs_disconnect(conn)
+    if conn != None and conn >= 0:
+        ifl.pbs_disconnect(conn)
     if verbose > 1:
         print (bs)
     return bs
