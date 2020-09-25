@@ -33,12 +33,13 @@ to pbs_rstat, but accepts field selections similarly to NAS's qstat.
 pbs_conf = ifl.cvar.pbs_conf
 verbose = 0
 args = None
+opts_W = list()
 default_fields = ['name', 'queue', 'user', 'state', 'start', 'duration', 'end']
 known_fields = []
 field_list = []
 
 def main():
-    global verbose, args, field_list, known_fields
+    global verbose, args, opts_W, field_list, known_fields
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, 30):
         try:
@@ -141,7 +142,6 @@ def adjust_formats(fl, W):
         # Is it our kind of W option?
         mo = re.match(r'fmt_(\w+)=(.+)', wopt)
         if not mo:
-            print("rejecting %s" % wopt, file=sys.stderr)
             continue
         # Do we care about it?
         name = mo.group(1)
@@ -235,6 +235,8 @@ def display_standard(resvs, field_list):
         resvs = list of info for reservations
         field_list = desired fields to display
     '''
+    global opts_W
+
     c = layout.Config()
     for fld in field_list:
         title = fld['title']
@@ -246,7 +248,8 @@ def display_standard(resvs, field_list):
         row = [globals()[f['func']](f, resv) for f in field_list]
         rows.append(row)
     if rows:
-        res = layout.layout(c, rows)
+        show_hdr = '-h' not in opts_W
+        res = layout.layout(c, rows, show_hdr=show_hdr)
         print('\n'.join([x.rstrip() for x in res]))
 
 def gen_field_list():
@@ -262,14 +265,15 @@ def gen_field_list():
     fl = []
     fl.append(gen_field('name', 'Name', None, 'get_by_attr', 'Reserve_Name'))
     fl.append(gen_field('queue', 'Queue', None, 'get_by_name', 'queue'))
-    fl.append(gen_field('user', 'User', None, 'get_by_attr', 'Reserve_Owner'))
-    fl.append(gen_field('state', 'State', None, 'get_by_attr', 'reserve_state'))
+    fl.append(gen_field('user', 'User', None, 'get_user', 'Reserve_Owner'))
+    fl.append(gen_field('state', 'State', None, 'get_state', 'reserve_state'))
     fl.append(gen_field('start', 'Start', {'hj':'r'}, 'get_date', 'reserve_start'))
     fl.append(gen_field('duration', 'Duration', {'hj':'r'}, 'get_duration', 'reserve_duration'))
     fl.append(gen_field('end', 'End', None, 'get_date', 'reserve_end'))
     fl.append(gen_field('groups', 'Groups', None, 'get_by_attr', 'Authorized_Groups'))
     fl.append(gen_field('users', 'Users', None, 'get_by_attr', 'Authorized_Users'))
-    fl.append(gen_field('nodes', 'Nodes', None, 'get_by_attr', 'resv_nodes'))
+    fl.append(gen_field('nodes', 'Nodes', None, 'get_nodes', 'resv_nodes'))
+    fl.append(gen_field('reserved', 'Reserved', None, 'get_by_attr', 'resv_nodes'))
     return fl
 
 def gen_field(name, title, form, func, source):
@@ -395,6 +399,7 @@ def get_server(job_id):
 # Args:
 #   fi = field info
 #   rinfo = reservation info
+#   opts = options list
 
 def get_by_attr(fi, rinfo):
     attr_name = fi['sources']
@@ -414,15 +419,52 @@ def get_by_name(fi, rinfo, name=None):
     return result
 
 def get_date(fi, rinfo):
-    # XXX
-    return get_by_attr(fi, rinfo)
+    global opts_W
+    rawv = get_by_attr(fi, rinfo)
+    # If -W -r, return raw value
+    if '-r' in opts_W or rawv == '--':
+        return rawv
+    result = time.strftime(r'%y-%m-%d/%H:%M', time.localtime(int(rawv)))
+    return result
 
 def get_duration(fi, rinfo):
-    # XXX
-    return get_by_attr(fi, rinfo)
+    global opts_W
+    rawv = get_by_attr(fi, rinfo)
+    if '-r' in opts_W or rawv == '--':
+        return rawv
+    return secstoclock(int(rawv))
 
 def get_name(fi, rinfo):
     return rinfo['Reserve_Name']
+
+def get_nodes(fi, rinfo):
+    # Raw format:  (r789i0n4:ncpus=1)+(r789i0n5:ncpus=1)
+    global opts_W
+    rawv = get_by_attr(fi, rinfo)
+    if '-r' in opts_W or rawv == '--':
+        return rawv
+    items = rawv.split('+')
+    nodes = list()
+    for item in items:
+        mo = re.match(r'\(?([^:]+)', item)
+        if mo:
+            nodes.append(mo.group(1))
+    return ",".join(nodes)
+
+def get_state(fi, rinfo):
+    global opts_W
+    rawv = get_by_attr(fi, rinfo)
+    if '-r' in opts_W or rawv == '--':
+        return rawv
+    return ("--",  "UN", "CO", "WT", "TR", "RN", "FN", "BD", "DE", "DJ", "DG", "AL", "IC")[int(rawv)]
+
+def get_user(fi, rinfo):
+    global opts_W
+    rawv = get_by_attr(fi, rinfo)
+    # If -W -r, return raw value
+    if '-r' in opts_W or rawv == '--':
+        return rawv
+    return rawv.split('@')[0]
 
 def parse_jobid(job_id):
     '''Split job ID into its pieces
@@ -455,6 +497,39 @@ def parse_jobid(job_id):
     parent = mo.group('parent')
     current = mo.group('current')
     return (seq_no, parent, current)
+
+def secstoclock(v, sf=False, df=False):
+    '''Convert time in seconds for display
+
+    Args:
+        v = time, in seconds
+        sf = True to display seconds also
+        df = True to convert time over 48 hours into days
+    Returns:
+        string in form [days+]hh:mm[:ss]
+    '''
+    if v == '' or v == '--':
+        return v
+    if v < 0:
+        sign = '-'
+        v = 0 - v
+    else:
+        sign = ''
+    if sf:
+        secsuf = ":%02d" % (v % 60)
+        dhm = v // 60
+    else:
+        secsuf = ""
+        dhm = (v + 30) // 60
+    if df and dhm // 60 > 48:
+        d = dhm // (24 * 60)
+        daypfx = "%dd+" % d
+        dhm = dhm - d * 24 * 60
+    else:
+        daypfx = ""
+    hh = dhm // 60
+    mm = dhm % 60
+    return r'%s%s%02d:%02d%s' % (sign, daypfx, hh, mm, secsuf)
 
 if __name__ == '__main__':
     sys.exit(main())
