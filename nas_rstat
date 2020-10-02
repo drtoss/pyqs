@@ -39,7 +39,7 @@ known_fields = []
 field_list = []
 
 def main():
-    global verbose, args, opts_W, field_list, known_fields
+    global verbose, args, opts_W, field_list, known_fields, default_fields
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, 30):
         try:
@@ -79,10 +79,14 @@ def main():
     opts_W = args.W
     if opts_W is None:
         opts_W = list()
+    if args.B:
+        default_fields = ['name']
     # Handle -W options
     (field_list, attr_list) = collect_fields(default_fields, opts_W)
     if not adjust_formats(field_list, opts_W):
         return 1
+    if args.F:
+        attr_list = None
     # Collect the info
     if (ifl.pbs_loadconf(0) == 0):
         print("Cannot get PBS configuration information", file=sys.stderr)
@@ -219,11 +223,41 @@ L           fl = list of field_info dictionaries describing field selected
             file=sys.stderr)
         print("Known fields are: %s" % ', '.join(sorted(knowns)),
             file=sys.stderr)
-    fil = [knownmap[x] for x in fl]
+    fil = [knownmap[x] for x in fl if x in knownmap]
     aset = set(list([x['sources'] for x in fil]))
     if verbose:
         print("Need these attributes: %s" % ', '.join(sorted(aset)))
     return (fil, aset)
+
+def display_brief(resvs, field_list):
+    '''Display brief output.
+
+    That is, display only the reservation IDs
+    Args:
+        resvs = list of info for reservatons
+        field_list = <ignored>
+    '''
+    for resv in resvs:
+        resvid = resv['id']
+        print("Resv ID:", resvid)
+
+def display_full(resvs, field_list):
+    '''Display full output.
+
+    Display everything about the reservations, one line per item.
+    '''
+    for resv in resvs:
+        resvid = resv['id']
+        print("Resv ID:", resvid)
+        for key in resv:
+            tag = key
+            value = resv[key]
+            if key == 'id':
+                pass
+            elif key == 'reserve_state':
+                value = decode_state(value)
+            print(key, '=', value)
+        print()
 
 def display_standard(resvs, field_list):
     '''Output info in standard format
@@ -274,6 +308,8 @@ def gen_field_list():
     fl.append(gen_field('users', 'Users', None, 'get_by_attr', 'Authorized_Users'))
     fl.append(gen_field('nodes', 'Nodes', None, 'get_nodes', 'resv_nodes'))
     fl.append(gen_field('reserved', 'Reserved', None, 'get_by_attr', 'resv_nodes'))
+    fl.append(gen_field('select', 'Select', None, 'get_by_name', 'Resource_List'))
+    fl.append(gen_field('sselect', 'SSelect', None, 'get_by_attr', 'schedselect'))
     return fl
 
 def gen_field(name, title, form, func, source):
@@ -310,8 +346,11 @@ def get_resv_info(resvids, attr_list):
         List of PBS batchstatus results
     '''
     bu = BatchUtils()
-    attr_list = (','.join(attr_list)).split(',')
-    atl = bu.list_to_attrl(list(attr_list))
+    if attr_list != None:
+        attr_list = (','.join(attr_list)).split(',')
+        atl = bu.list_to_attrl(list(attr_list))
+    else:
+        atl = None
     bs = list()
     if resvids == None or len(resvids) == 0:
         # Ask for all reservations
@@ -370,6 +409,9 @@ def get_server(job_id):
     (seq_num, parent_server, current_server) = parse_jobid(job_id)
     if seq_num == None:
         return (None, None)
+    if parent_server and not pbs_server_name:
+        pbs_server_name = parent_server
+        server_out = parent_server
     if current_server:
         server_out = current_server
     job_id_out = seq_num
@@ -456,6 +498,9 @@ def get_state(fi, rinfo):
     rawv = get_by_attr(fi, rinfo)
     if '-r' in opts_W or rawv == '--':
         return rawv
+    return decode_state(rawv)
+
+def decode_state(rawv):
     return ("--",  "UN", "CO", "WT", "TR", "RN", "FN", "BD", "DE", "DJ", "DG", "AL", "IC")[int(rawv)]
 
 def get_user(fi, rinfo):
