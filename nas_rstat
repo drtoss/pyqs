@@ -51,7 +51,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('-B', default=False, action='store_true',
         help='brief output: just reservation IDs')
-    parser.add_argument('-F', '-f', default=False, action='store_true',
+    parser.add_argument('-F', default=False, action='store_true',
         help='request full details')
     parser.add_argument('-S', default=False, action='store_true',
         help='request short output (default)')
@@ -59,7 +59,7 @@ def main():
         help='increase debugging verbosity')
     parser.add_argument('--version', action='version',
         version='%(prog)s $Id:$')
-    parser.add_argument('-W', action='append',
+    parser.add_argument('-W', action='append', metavar='display option',
         help='options affecting field selection and disply. See qstat.1B')
     parser.add_argument('resvids', nargs=argparse.REMAINDER,
         help='reservations to list')
@@ -224,7 +224,7 @@ L           fl = list of field_info dictionaries describing field selected
         print("Known fields are: %s" % ', '.join(sorted(knowns)),
             file=sys.stderr)
     fil = [knownmap[x] for x in fl if x in knownmap]
-    aset = set(list([x['sources'] for x in fil]))
+    aset = set(list([x['sources'] for x in fil if x['sources'] != '']))
     if verbose:
         print("Need these attributes: %s" % ', '.join(sorted(aset)))
     return (fil, aset)
@@ -313,6 +313,8 @@ def gen_field_list():
     fl.append(gen_field('reserved', 'Reserved', None, 'get_by_attr', 'resv_nodes'))
     fl.append(gen_field('select', 'Select', None, 'get_by_name', 'Resource_List'))
     fl.append(gen_field('sselect', 'SSelect', None, 'get_by_attr', 'schedselect'))
+    fl.append(gen_field('nodect', 'Nodect', {'hj': 'r'}, 'get_by_name', 'Resource_List'))
+    fl.append(gen_field('id', 'Resv ID', None, 'get_id', None))
     return fl
 
 def gen_field(name, title, form, func, source):
@@ -482,6 +484,13 @@ def get_duration(fi, rinfo):
     if '-r' in opts_W or rawv == '--':
         return rawv
     return secstoclock(int(rawv))
+
+def get_id(fi, rinfo):
+    global opts_W
+    rawv = rinfo['id']
+    if '-r' in opts_W or rawv == '--':
+        return rawv
+    return rawv.split('.')[0]
 
 def get_name(fi, rinfo):
     return rinfo['Reserve_Name']
