@@ -249,13 +249,16 @@ def display_full(resvs, field_list):
     for resv in resvs:
         resvid = resv['id']
         print("Resv ID:", resvid)
-        for key in resv:
+        for key in sorted(resv):
             tag = key
             value = resv[key]
-            if key == 'id':
-                pass
+            # Skip a few boring items
+            if key in ['id', 'resv_nodes', 'interactive']:
+                continue
             elif key == 'reserve_state':
-                value = decode_state(value)
+                value = decode_state_full(value)
+            elif key in ['reserve_start', 'reserve_end', 'ctime', 'mtime']:
+                value = decode_epoch_full(value)
             print(key, '=', value)
         print()
 
@@ -469,6 +472,10 @@ def get_date(fi, rinfo):
     result = time.strftime(r'%y-%m-%d/%H:%M', time.localtime(int(rawv)))
     return result
 
+def decode_epoch_full(rawv):
+    result = time.strftime('%c', time.localtime(int(rawv)))
+    return result
+
 def get_duration(fi, rinfo):
     global opts_W
     rawv = get_by_attr(fi, rinfo)
@@ -502,6 +509,13 @@ def get_state(fi, rinfo):
 
 def decode_state(rawv):
     return ("--",  "UN", "CO", "WT", "TR", "RN", "FN", "BD", "DE", "DJ", "DG", "AL", "IC")[int(rawv)]
+
+def decode_state_full(rawv):
+    return ("RESV_NONE", "RESV_UNCONFIRMED", "RESV_CONFIRMED",
+            "RESV_WAIT", "RESV_TIME_TO_RUN", "RESV_RUNNING",
+            "RESV_FINISHED", "RESV_BEING_DELETED", "RESV_DELETED",
+            "RESV_DELETING_JOBS", "RESV_DEGRADED", "RESV_BEING_ALTERED",
+            "RESV_IN_CONFLICT")[int(rawv)]
 
 def get_user(fi, rinfo):
     global opts_W
