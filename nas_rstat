@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/PBS/bin/pbs_python
 # $Header:$
 #Author:dtalcott
 #Purpose:Python equivalent of pbs_rstat, but with options for how
@@ -17,12 +17,14 @@ import socket
 import time
 
 PBS_EXEC = os.environ.get('PBS_EXEC', '/PBS')
-sys.path.append('/PBS_new/lib/site')
+# sys.path.append('/PBS_new/lib/site')
 sys.path.append(os.path.join(PBS_EXEC, 'lib', 'site'))
 
 import pbs_ifl as ifl
 from utils import BatchUtils
-import layout
+import nas_layout as layout
+import nas_field_format
+from nas_field_format import NAS_field_format,gen_field
 
 long_desc = '''Display information about reservations
 
@@ -35,11 +37,9 @@ verbose = 0
 args = None
 opts_W = list()
 default_fields = ['name', 'queue', 'user', 'state', 'start', 'duration', 'end']
-known_fields = []
-field_list = []
 
 def main():
-    global verbose, args, opts_W, field_list, known_fields, default_fields
+    global verbose, args, opts_W, default_fields
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, 30):
         try:
@@ -75,16 +75,18 @@ def main():
         print("Use only one of B, F, S, f", file=sys.stderr)
         return 1
     # Build list of known fields
-    known_fields = gen_field_list()
     opts_W = args.W
     if opts_W is None:
         opts_W = list()
     if args.B:
         default_fields = ['name']
+    fmtr = NAS_field_format(default_fields, verbose, opts_W)
+    fmtr.known_fields = gen_field_list()
     # Handle -W options
-    (field_list, attr_list) = collect_fields(default_fields, opts_W)
-    if not adjust_formats(field_list, opts_W):
+    (field_list, attr_list) = fmtr.collect_fields()
+    if not fmtr.adjust_formats(field_list):
         return 1
+    fmtr.field_list = field_list
     if args.F:
         attr_list = None
     # Collect the info
@@ -94,157 +96,33 @@ def main():
     resvs = get_resv_info(args.resvids, attr_list)
     # Display it
     if args.B:
-        display_brief(resvs, field_list)
+        display_brief(resvs, fmtr)
     elif args.F:
-        display_full(resvs, field_list)
+        display_full(resvs, fmtr)
     else:
-        display_standard(resvs, field_list)
+        display_standard(resvs, fmtr)
     return 0
 
-def adjust_formats(fl, W):
-    '''Adjust layout options for fields
-
-    Take a list of field_info dictionaries and modify the layout parameters
-    from the -W options. The options we are interested in look like:
-
-    settings ::= [title] option_list [junk]
-    title ::= word | quoted_string
-    option_list :== option+
-    option ::= '-' key value
-    key ::= word
-    value ::= word | quoted_string
-    quoted_string ::= sglQuotedString | dblQuotedString | QuotedString({ })
-    junk ::= remainder of line
-
-    We use the pyparsing module to deal with the ugly option syntax
-
-    Args:
-        fl = list of field_info data
-        W = -W options from command line
-    Returns: True if no errors, else False
-    '''
-    # First build parser that recognizes -W fmt_xxx=-key value -key value
-    import pyparsing as pp
-    quoted_string = \
-            pp.QuotedString(quoteChar = '"', endQuoteChar = '"') | \
-            pp.QuotedString(quoteChar = "'", endQuoteChar = "'") | \
-            pp.QuotedString(quoteChar = '{', endQuoteChar = '}')
-    title = pp.Word(pp.alphanums) | quoted_string
-    value = pp.Word(pp.alphanums) | quoted_string
-    key = pp.Word(pp.alphas)
-    option = pp.Suppress('-') + key + value
-    option_list = option[...]
-    junk = pp.SkipTo(pp.LineEnd())
-    settings = pp.Optional(title('title')) + option_list + \
-        pp.Optional(junk('junk'))
-
-    # Now apply it to appropriate -W options
-    errcnt = 0
-    for wopt in W:
-        if wopt.startswith('o='):
-            continue
-        # Is it our kind of W option?
-        mo = re.match(r'fmt_(\w+)=(.+)', wopt)
-        if not mo:
-            continue
-        # Do we care about it?
-        name = mo.group(1)
-        for i in range(len(fl)):
-            if fl[i]['name'] == name:
-                idx = i
-                break
-        else:
-            continue
-        opt_str = mo.group(2)
-        opts = settings.parseString(opt_str)
-        if opts.junk:
-            print("Garbage in format spec %s at %s" % (wopt, opts.junk),
-                file = sys.stderr)
-            errcnt += 1
-            continue
-        # Discard empty junk
-        if opts[-1] == '':
-            opts.pop()
-        # Check for new field title
-        if len(opts) % 2:
-            fl[idx]['title'] = opts.pop(0).split()
-        # Merge in new format options
-        for i in range(0, len(opts), 2):
-            key = opts[i]
-            val = opts[i+1]
-            fl[idx]['format'][key] = val
-    if errcnt:
-        return False
-    return True
-
-def collect_fields(df, W):
-    '''Generate list of fields
-
-    Args:
-        df = list of names of default fields
-        W = list of -W arguments, if any
-    Globals:
-        known_fields = List of info about known fields
-    Returns:
-        (fl, aset) where
-L           fl = list of field_info dictionaries describing field selected
-                for display
-            aset = set of PBS attributes holding data for fields in fl
-    '''
-    global known_fields, verbose
-    fl = df
-    if W is None:
-        W = []
-    for opt in W:
-        # Only interested in changes to list of fields
-        mo = re.match(r'o=([+-]?)(.*)', opt)
-        if not mo:
-            continue
-        plusminus = mo.group(1)
-        names = mo.group(2).split(',')
-        if plusminus == '':
-            fl = [n.strip() for n in names]
-        elif plusminus == '-':
-            for name in names:
-                name = name.strip()
-                while name in fl:
-                    fl.remove(name)
-        else:
-            for name in names:
-                fl.append(name.strip())
-    # Now, validate fields and constuct results
-    knownmap = dict([[x['name'], x] for x in known_fields])
-    knowns = set(knownmap.keys())
-    requested = set(fl)
-    unknowns = requested.difference(knowns)
-    if unknowns:
-        plural = 's' if len(unknowns) > 1 else ''
-        print("Unknown field name%s: %s" % (plural, ', '.join(sorted(unknowns))),
-            file=sys.stderr)
-        print("Known fields are: %s" % ', '.join(sorted(knowns)),
-            file=sys.stderr)
-    fil = [knownmap[x] for x in fl if x in knownmap]
-    aset = set(list([x['sources'] for x in fil if x['sources'] != '']))
-    if verbose:
-        print("Need these attributes: %s" % ', '.join(sorted(aset)))
-    return (fil, aset)
-
-def display_brief(resvs, field_list):
+def display_brief(resvs, fmtr):
     '''Display brief output.
 
     That is, display only the reservation IDs
     Args:
         resvs = list of info for reservatons
-        field_list = <ignored>
+        fmtr = <ignored>
     '''
     for resv in resvs:
         resvid = resv['id']
         print("Resv ID:", resvid)
 
-def display_full(resvs, field_list):
+def display_full(resvs, fmtr):
     '''Display full output.
 
     Display everything about the reservations, one line per item.
+
+    Args:
+        resvs = list of info for reservations
+        fmtr = field formatter object
     '''
     for resv in resvs:
         resvid = resv['id']
@@ -256,13 +134,13 @@ def display_full(resvs, field_list):
             if key in ['id', 'resv_nodes', 'interactive']:
                 continue
             elif key == 'reserve_state':
-                value = decode_state_full(value)
+                value = fmtr.decode_state_full(value)
             elif key in ['reserve_start', 'reserve_end', 'ctime', 'mtime']:
-                value = decode_epoch_full(value)
+                value = fmtr.decode_epoch_full(value)
             print(key, '=', value)
         print()
 
-def display_standard(resvs, field_list):
+def display_standard(resvs, fmtr):
     '''Output info in standard format
 
     For each reservation, generate a list of display values for each
@@ -270,19 +148,22 @@ def display_standard(resvs, field_list):
     layout for display.
     Args:
         resvs = list of info for reservations
-        field_list = desired fields to display
+        fmtr = field formatter object
     '''
     global opts_W
 
     c = layout.Config()
-    for fld in field_list:
+    for fld in fmtr.field_list:
         title = fld['title']
         if not title:
             title = fld['name']
         c.add_field(title, **fld['format'])
     rows = list()
     for resv in resvs:
-        row = [globals()[f['func']](f, resv) for f in field_list]
+        row = list()
+        for f in fmtr.field_list:
+            func = getattr(nas_field_format, f['func'])
+            row.append(func(f, resv, opts_W))
         rows.append(row)
     if rows:
         show_hdr = '-h' not in opts_W
@@ -300,46 +181,22 @@ def gen_field_list():
         sources: reservation attributes whose values are needed by func
     '''
     fl = []
-    fl.append(gen_field('name', 'Name', None, 'get_by_attr', 'Reserve_Name'))
-    fl.append(gen_field('queue', 'Queue', None, 'get_by_name', 'queue'))
-    fl.append(gen_field('user', 'User', None, 'get_user', 'Reserve_Owner'))
-    fl.append(gen_field('state', 'State', None, 'get_state', 'reserve_state'))
-    fl.append(gen_field('start', 'Start', {'hj':'r'}, 'get_date', 'reserve_start'))
-    fl.append(gen_field('duration', 'Duration', {'hj':'r'}, 'get_duration', 'reserve_duration'))
-    fl.append(gen_field('end', 'End', None, 'get_date', 'reserve_end'))
-    fl.append(gen_field('groups', 'Groups', None, 'get_by_attr', 'Authorized_Groups'))
-    fl.append(gen_field('users', 'Users', None, 'get_by_attr', 'Authorized_Users'))
-    fl.append(gen_field('nodes', 'Nodes', None, 'get_nodes', 'resv_nodes'))
-    fl.append(gen_field('reserved', 'Reserved', None, 'get_by_attr', 'resv_nodes'))
-    fl.append(gen_field('select', 'Select', None, 'get_by_name', 'Resource_List'))
-    fl.append(gen_field('sselect', 'SSelect', None, 'get_by_attr', 'schedselect'))
-    fl.append(gen_field('nodect', 'Nodect', {'hj': 'r'}, 'get_by_name', 'Resource_List'))
-    fl.append(gen_field('id', 'Resv ID', None, 'get_id', None))
+    fl.append(gen_field('name', 'Name', None, 'fmt_by_attr', 'Reserve_Name'))
+    fl.append(gen_field('queue', 'Queue', None, 'fmt_by_name', 'queue'))
+    fl.append(gen_field('user', 'User', None, 'fmt_user', 'Reserve_Owner'))
+    fl.append(gen_field('state', 'State', None, 'fmt_state', 'reserve_state'))
+    fl.append(gen_field('start', 'Start', {'hj':'r'}, 'fmt_date', 'reserve_start'))
+    fl.append(gen_field('duration', 'Duration', {'hj':'r'}, 'fmt_duration', 'reserve_duration'))
+    fl.append(gen_field('end', 'End', None, 'fmt_date', 'reserve_end'))
+    fl.append(gen_field('groups', 'Groups', None, 'fmt_by_attr', 'Authorized_Groups'))
+    fl.append(gen_field('users', 'Users', None, 'fmt_by_attr', 'Authorized_Users'))
+    fl.append(gen_field('nodes', 'Nodes', None, 'fmt_nodes', 'resv_nodes'))
+    fl.append(gen_field('reserved', 'Reserved', None, 'fmt_by_attr', 'resv_nodes'))
+    fl.append(gen_field('select', 'Select', None, 'fmt_by_name', 'Resource_List'))
+    fl.append(gen_field('sselect', 'SSelect', None, 'fmt_by_attr', 'schedselect'))
+    fl.append(gen_field('nodect', 'Nodect', {'hj': 'r'}, 'fmt_by_name', 'Resource_List'))
+    fl.append(gen_field('id', 'Resv ID', None, 'fmt_id', None))
     return fl
-
-def gen_field(name, title, form, func, source):
-    '''Create a field_info dict
-
-    Args:
-        name = name of field
-        title = display title for field
-        form = dictionary of non-default formatting options for field
-        func = name of function to calculate display value of field
-        source = PBS attributes used to by func
-    '''
-    if form is None:
-        form = {}
-    if func is None:
-        func = 'get_by_name'
-    if source is None:
-        source = ''
-    fi = {'name': name,
-        'title': title,
-        'format': form,
-        'func': func,
-        'sources': source
-        }
-    return fi
 
 def get_resv_info(resvids, attr_list):
     '''Ask server for info about reservations
@@ -440,164 +297,6 @@ def get_server(job_id):
         return (None, None)
     job_id_out = job_id_out + '.' + pbs_server_name
     return (job_id_out, server_out)
-
-# Functions to compute specific values for display
-# get_xxx(fi, rinfo)
-# Args:
-#   fi = field info
-#   rinfo = reservation info
-#   opts = options list
-
-def get_by_attr(fi, rinfo):
-    attr_name = fi['sources']
-    return get_by_name(fi, rinfo, attr_name)
-
-def get_by_name(fi, rinfo, name=None):
-    if name == None:
-        name = fi['name']
-    if name in rinfo:
-        result = rinfo[name]
-    else:
-        t = 'Resource_List.' + name
-        if t in rinfo:
-            result = rinfo[t]
-        else:
-            result = '--'
-    return result
-
-def get_date(fi, rinfo):
-    global opts_W
-    rawv = get_by_attr(fi, rinfo)
-    # If -W -r, return raw value
-    if '-r' in opts_W or rawv == '--':
-        return rawv
-    result = time.strftime(r'%y-%m-%d/%H:%M', time.localtime(int(rawv)))
-    return result
-
-def decode_epoch_full(rawv):
-    result = time.strftime('%c', time.localtime(int(rawv)))
-    return result
-
-def get_duration(fi, rinfo):
-    global opts_W
-    rawv = get_by_attr(fi, rinfo)
-    if '-r' in opts_W or rawv == '--':
-        return rawv
-    return secstoclock(int(rawv))
-
-def get_id(fi, rinfo):
-    global opts_W
-    rawv = rinfo['id']
-    if '-r' in opts_W or rawv == '--':
-        return rawv
-    return rawv.split('.')[0]
-
-def get_name(fi, rinfo):
-    return rinfo['Reserve_Name']
-
-def get_nodes(fi, rinfo):
-    # Raw format:  (r789i0n4:ncpus=1)+(r789i0n5:ncpus=1)
-    global opts_W
-    rawv = get_by_attr(fi, rinfo)
-    if '-r' in opts_W or rawv == '--':
-        return rawv
-    items = rawv.split('+')
-    nodes = list()
-    for item in items:
-        mo = re.match(r'\(?([^:]+)', item)
-        if mo:
-            nodes.append(mo.group(1))
-    return ",".join(nodes)
-
-def get_state(fi, rinfo):
-    global opts_W
-    rawv = get_by_attr(fi, rinfo)
-    if '-r' in opts_W or rawv == '--':
-        return rawv
-    return decode_state(rawv)
-
-def decode_state(rawv):
-    return ("--",  "UN", "CO", "WT", "TR", "RN", "FN", "BD", "DE", "DJ", "DG", "AL", "IC")[int(rawv)]
-
-def decode_state_full(rawv):
-    return ("RESV_NONE", "RESV_UNCONFIRMED", "RESV_CONFIRMED",
-            "RESV_WAIT", "RESV_TIME_TO_RUN", "RESV_RUNNING",
-            "RESV_FINISHED", "RESV_BEING_DELETED", "RESV_DELETED",
-            "RESV_DELETING_JOBS", "RESV_DEGRADED", "RESV_BEING_ALTERED",
-            "RESV_IN_CONFLICT")[int(rawv)]
-
-def get_user(fi, rinfo):
-    global opts_W
-    rawv = get_by_attr(fi, rinfo)
-    # If -W -r, return raw value
-    if '-r' in opts_W or rawv == '--':
-        return rawv
-    return rawv.split('@')[0]
-
-def parse_jobid(job_id):
-    '''Split job ID into its pieces
-
-    Also works for reservations.
-    Args:
-        job_id = job id in one of its various forms
-    Returns:
-        (seq_num, parent_server, current_server) where
-            seq_num = numeric part of job id
-            parent_server = hostname where job submitted
-            current_server = server currently holding job
-    Based on C routine of the same name
-    '''
-    job_re = r'(?P<seq_no>\d+(\[\d*\])?)(\.(?P<parent>[^@]*))?(@(?P<current>.+))?'
-    resv_re = r'(?P<seq_no>[MRS]\d+)(\.(?P<parent>[^@]*))?(@(?P<current>.+))?'
-    job_id = job_id.strip()
-    if job_id[0].isdigit():
-        mo = re.match(job_re, job_id)
-        if not mo:
-            return (None, None, None)
-        seq_no = mo.group('seq_no')
-        parent = mo.group('parent')
-        current = mo.group('current')
-        return (seq_no, parent, current)
-    mo = re.match(resv_re, job_id)
-    if not mo:
-        return (None, None, None)
-    seq_no = mo.group('seq_no')
-    parent = mo.group('parent')
-    current = mo.group('current')
-    return (seq_no, parent, current)
-
-def secstoclock(v, sf=False, df=False):
-    '''Convert time in seconds for display
-
-    Args:
-        v = time, in seconds
-        sf = True to display seconds also
-        df = True to convert time over 48 hours into days
-    Returns:
-        string in form [days+]hh:mm[:ss]
-    '''
-    if v == '' or v == '--':
-        return v
-    if v < 0:
-        sign = '-'
-        v = 0 - v
-    else:
-        sign = ''
-    if sf:
-        secsuf = ":%02d" % (v % 60)
-        dhm = v // 60
-    else:
-        secsuf = ""
-        dhm = (v + 30) // 60
-    if df and dhm // 60 > 48:
-        d = dhm // (24 * 60)
-        daypfx = "%dd+" % d
-        dhm = dhm - d * 24 * 60
-    else:
-        daypfx = ""
-    hh = dhm // 60
-    mm = dhm % 60
-    return r'%s%s%02d:%02d%s' % (sign, daypfx, hh, mm, secsuf)
 
 if __name__ == '__main__':
     sys.exit(main())
