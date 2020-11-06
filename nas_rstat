@@ -370,7 +370,7 @@ def get_resv_info(resvids, attr_list):
         conn = None
         for resid in resvids:
             (seq_no, server) = get_server(resid)
-            if seq_no == None:
+            if seq_no == None and server == None:
                 print("Invalid request id:", resid, file=sys.stderr)
                 continue
             if server == None:
