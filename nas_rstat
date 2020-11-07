@@ -17,7 +17,6 @@ import socket
 import time
 
 PBS_EXEC = os.environ.get('PBS_EXEC', '/PBS')
-# sys.path.append('/PBS_new/lib/site')
 sys.path.append(os.path.join(PBS_EXEC, 'lib', 'site'))
 
 import pbs_ifl as ifl
@@ -83,8 +82,12 @@ def main():
     fmtr = NAS_field_format(default_fields, verbose, opts_W)
     fmtr.known_fields = gen_field_list()
     # Handle -W options
-    (field_list, attr_list) = fmtr.collect_fields()
-    if not fmtr.adjust_formats(field_list):
+    (field_list, attr_list, errs) = fmtr.collect_fields()
+    if (errs):
+        print(errs, file = sys.stderr)
+    rc = fmtr.adjust_formats(field_list)
+    if rc != True:
+        print(rc, file=sys.stderr)
         return 1
     fmtr.field_list = field_list
     if args.F:

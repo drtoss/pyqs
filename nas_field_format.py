@@ -5,8 +5,8 @@
 #Last-modified: $Author: dtalcott $ on $Date: 2020/06/13 12:09:40 $
 #Reviewed-by: 
 #Reviewed-on: 
-from __future__ import print_function
 
+import re
 import time
 
 class NAS_field_format(object):
@@ -37,7 +37,7 @@ class NAS_field_format(object):
 
     Args:
         fl = list of field_info data
-    Returns: True if no errors, else False
+    Returns: True if no errors, else error messages
     '''
     # First build parser that recognizes -W fmt_xxx=-key value -key value
     import pyparsing as pp
@@ -55,7 +55,7 @@ class NAS_field_format(object):
         pp.Optional(junk('junk'))
 
     # Now apply it to appropriate -W options
-    errcnt = 0
+    errlist = []
     for wopt in self.W:
         if wopt.startswith('o='):
             continue
@@ -74,9 +74,7 @@ class NAS_field_format(object):
         opt_str = mo.group(2)
         opts = settings.parseString(opt_str)
         if opts.junk:
-            print("Garbage in format spec %s at %s" % (wopt, opts.junk),
-                file = sys.stderr)
-            errcnt += 1
+            errlist.append("Garbage in format spec %s at %s" % (wopt, opts.junk))
             continue
         # Discard empty junk
         if opts[-1] == '':
@@ -89,8 +87,8 @@ class NAS_field_format(object):
             key = opts[i]
             val = opts[i+1]
             fl[idx]['format'][key] = val
-    if errcnt:
-        return False
+    if errlist:
+        return '\n'.join(errlist)
     return True
 
   def collect_fields(self):
@@ -100,13 +98,15 @@ class NAS_field_format(object):
         default_fields = List of default field names
         known_fields = List of info about known fields
     Returns:
-        (fl, aset) where
+        (fl, aset, msg) where
 L           fl = list of field_info dictionaries describing field selected
                 for display
             aset = set of PBS attributes holding data for fields in fl
+            msg = Text of any errors, None if no errors
     '''
     fl = self.default_fields
     W = self.W
+    errlist = []
     if W is None:
         W = []
     for opt in W:
@@ -133,15 +133,13 @@ L           fl = list of field_info dictionaries describing field selected
     unknowns = requested.difference(knowns)
     if unknowns:
         plural = 's' if len(unknowns) > 1 else ''
-        print("Unknown field name%s: %s" % (plural, ', '.join(sorted(unknowns))),
-            file=sys.stderr)
-        print("Known fields are: %s" % ', '.join(sorted(knowns)),
-            file=sys.stderr)
+        errlist.append("Unknown field name%s: %s" % (plural, ', '.join(sorted(unknowns))))
+        errlist.append("Known fields are: %s" % ', '.join(sorted(knowns)))
     fil = [knownmap[x] for x in fl if x in knownmap]
     aset = set(list([x['sources'] for x in fil if x['sources'] != '']))
     if self.verbose:
         print("Need these attributes: %s" % ', '.join(sorted(aset)))
-    return (fil, aset)
+    return (fil, aset, '\n'.join(errlist) if errlist else None)
 
 def gen_field(name, title, form, func, source):
     '''Create a field_info dict
