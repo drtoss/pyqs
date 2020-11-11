@@ -64,7 +64,7 @@ def layout(config, rows, skip = 0, show_hdr = True):
             sep = ''
             for i in range(fldcnt):
                 fs = config.config[i]
-                fval = layout_field(fs.hj, fs.hf, colw[i], row[i])
+                fval = layout_field(fs.hj, fs.hf, colw[i], row[i], fs.ht)
                 line += sep + fval
                 sep = fs.hs
             result.append(line)
@@ -74,7 +74,7 @@ def layout(config, rows, skip = 0, show_hdr = True):
             sep = ''
             for i in range(fldcnt):
                 fs = config.config[i]
-                fval = layout_field(fs.dj, fs.df, colw[i], dashrow[i])
+                fval = layout_field(fs.dj, fs.df, colw[i], dashrow[i], fs.dt)
                 line += sep + fval
                 sep = fs.ds
             result.append(line)
@@ -84,7 +84,7 @@ def layout(config, rows, skip = 0, show_hdr = True):
         sep = ''
         for i in range(fldcnt):
             fs = config.config[i]
-            fval = layout_field(fs.rj, fs.rf, colw[i], row[skip+i])
+            fval = layout_field(fs.rj, fs.rf, colw[i], row[skip+i], fs.rt)
             line += sep + fval
             sep = fs.rs
         result.append(line)
@@ -96,9 +96,9 @@ class Config(object):
         self.config = list()
 
     class fieldspec(object):
-        def __init__(self, title, df='-', dj=None, ds=None,
-            hf=' ', hj='l', hs=None, maxw=-1, minw=0,
-            rf=None, rj=None, rs=None):
+        def __init__(self, title, df='-', dj=None, ds=None, dt='',
+            hf=' ', hj='l', hs=None, ht=None, maxw=-1, minw=0,
+            rf=None, rj=None, rs=None, rt=None):
 
             # Set contingent defaults
             if hs == None:
@@ -110,24 +110,31 @@ class Config(object):
                 dj = hj
             if ds == None:
                 ds = hs
+            if dt == None:
+                dt = ht
             if rf == None:
                 rf = hf
             if rj == None:
                 rj = hj
             if rs == None:
                 rs = hs
+            if rt == None:
+                rt = ht
             self.title = title
             self.df = df
             self.dj = dj
             self.ds = ds
+            self.dt = dt
             self.hf = hf
             self.hj = hj
             self.hs = hs
+            self.ht = ht
             self.maxw = int(maxw)
             self.minw = int(minw)
             self.rf = rf
             self.rj = rj
             self.rs = rs
+            self.rt = rt
 
     def add_field(self, title, **kwargs):
         '''Add settings for one field to config.
@@ -146,6 +153,8 @@ class Config(object):
             ds = dashseparator Character between this field and
                             the next
                             (default, hs)
+            dt = dashtrunc  String to indicate truncation of field
+                            (default, ht)
             hf = headerfill String to fill header text to width
                             of column
                             (default space)
@@ -154,6 +163,7 @@ class Config(object):
             hs = headerseparator Character between the field
                             header and the next
                             (default, space, unless maxw == 0)
+            ht = headertrunc String to indicate truncation of the field
             maxw            Maximum width of column, -1 implies
                             no maximum
             minw            Minimum width of column
@@ -165,6 +175,8 @@ class Config(object):
             rs = rowseparator Character between this data field
                             and the next
                             (default, hs)
+            rt = rowtrunc   String to indicate truncation of field
+                            (default, ht)
         '''
         c = self.fieldspec(title, **kwargs)
         self.config.append(c)
@@ -211,7 +223,7 @@ class Config(object):
                 if t > colw[i]:
                     colw[i] = t
 
-def layout_field(just, fill, width, value):
+def layout_field(just, fill, width, value, trunc=None):
     '''layout one field's value
 
     Args:
@@ -219,20 +231,64 @@ def layout_field(just, fill, width, value):
         fill = fill character/string
         width = field width to justify within
         value = text value to layout
+        trunc = truncation character/string
     Returns:
         string with value laid out
     '''
-    def leftmost(s, n):
-        return s[0:min(n, len(s))]
-    def rightmost(s, n):
-        return s[max(0, len(s) - n):]
-    def centermost(s, n):
-        sl = len(s)
-        if n > sl:
+    def leftmost(s, n, e=None):
+        '''Take leftmost characters of string
+
+        Args:
+            s = the string
+            n = the max number of characters
+            e = elipses string to indicate truncated field
+        Returns:
+            leftmost part of s
+        '''
+        if len(s) <= n:
             return s
-        f = (sl - n) // 2
-        l = f + n
-        return s[f:l]
+        if not e:
+            return s[0:n]
+        if len(e) > n:
+            e = e[0:n]
+        return s[0:n - len(e)] + e
+    def rightmost(s, n, e=None):
+        if len(s) <= n:
+            return s
+        if not e:
+            return s[len(s) - n:]
+        if len(e) > n:
+            e = e[len(e) - n:]
+        return e + s[len(s) - n + len(e):]
+    def centermost(s, n, e=None):
+        '''Return n characters from center of string'''
+        sl = len(s)
+        if n >= sl:
+            return s
+        if not e:
+            f = (sl - n) // 2
+            l = f + n
+            return s[f:l]
+        if n < 2 * len(e):
+            s = e + e
+            sl = len(s)
+            f = (sl - n) // 2
+            l = f + n
+            return s[f:l]
+        f = (sl - n) // 2 + len(e)
+        l = f + n - 2 * len(e)
+        return e + s[f:l] + e
+    def endmost(s, n, e=None):
+        '''Return n characters from ends of string'''
+        sl = len(s)
+        if n >= sl:
+            return s
+        if not e:
+            half = n // 2
+            return s[0:half] + s[sl - (n - half):]
+        el = len(e)
+        half = (n - el) // 2
+        return s[0:half] + e + s[sl - (n - half) + el:]
 
     if width == 0:
         return ''
@@ -250,13 +306,15 @@ def layout_field(just, fill, width, value):
         lfill = ''
         rfill = ''
         if just == 'l':
-            result = leftmost(value, width)
+            result = leftmost(value, width, trunc)
         elif just == 'r':
-            result = rightmost(value, width)
+            result = rightmost(value, width, trunc)
         elif just == 'c':
-            result = centermost(value, width)
+            result = centermost(value, width, trunc)
+        elif just == 'e':
+            result = endmost(value, width, trunc)
         else:
-            result = leftmost(value, width)
+            result = leftmost(value, width, trunc)
     else:
         result = value
         flm1 = flen - 1
@@ -278,15 +336,25 @@ def layout_field(just, fill, width, value):
     return lfill + result + rfill
 
 def test():
-    print(layout_field('l', '--', 10, 'abc'))
+    print(layout_field('l', '--', 10, 'abc', '*'))
     print(layout_field('l', '--', 5, 'abcdefg'))
+    print(layout_field('l', '--', 5, 'abcdefg', '*'))
+    print(layout_field('l', '--', 5, 'abcdefg', '...'))
     print(layout_field('c', '.', 10, 'abc'))
     print(layout_field('c', '.', 11, 'abc'))
     print(layout_field('c', '.', 10, 'abcd'))
     print(layout_field('c', '.', 11, 'abcd'))
     print(layout_field('c', '.', 5, 'abcdefg'))
+    print(layout_field('c', '.', 5, 'abcdefg', '*'))
+    print(layout_field('c', '.', 5, 'abcdefg', '__'))
+    print(layout_field('c', '.', 5, 'abcdefg', '123'))
     print(layout_field('r', '.', 5, 'abcdefg'))
+    print(layout_field('r', '.', 5, 'abcdefg', '*'))
     print(layout_field('r', '.', 10, 'abcdefg'))
+    print(layout_field('e', '.', 5, 'abcdefg'))
+    print(layout_field('e', '.', 5, 'abcdefg', '*'))
+    print(layout_field('e', '.', 6, 'abcdefg', '*'))
+    print(layout_field('e', '.', 10, 'abcdefg'))
 
     c = Config()
     c.add_field('fld1')
