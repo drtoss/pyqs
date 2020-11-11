@@ -24,7 +24,7 @@ class NAS_field_format(object):
     Take a list of field_info dictionaries and modify the layout parameters
     from the -W options. The options we are interested in look like:
 
-    settings ::= [title] option_list [junk]
+    settings ::= ['title:' title] option_list [junk]
     title ::= word | quoted_string
     option_list :== option+
     option ::= '-' key value
@@ -45,10 +45,10 @@ class NAS_field_format(object):
             pp.QuotedString(quoteChar = '"', endQuoteChar = '"') | \
             pp.QuotedString(quoteChar = "'", endQuoteChar = "'") | \
             pp.QuotedString(quoteChar = '{', endQuoteChar = '}')
-    title = pp.Word(pp.alphanums) | quoted_string
+    title = pp.Suppress('title:') + ( pp.Word(pp.alphanums) | quoted_string )
     value = pp.Word(pp.alphanums) | quoted_string
     key = pp.Word(pp.alphas)
-    option = pp.Suppress('-') + key + value
+    option = ( pp.Suppress('-') + key + value ) | ( key + pp.Suppress(':') + value )
     option_list = option[...]
     junk = pp.SkipTo(pp.LineEnd())
     settings = pp.Optional(title('title')) + option_list + \
@@ -80,7 +80,7 @@ class NAS_field_format(object):
         if opts[-1] == '':
             opts.pop()
         # Check for new field title
-        if len(opts) % 2:
+        if opts.title:
             fl[idx]['title'] = opts.pop(0).split()
         # Merge in new format options
         for i in range(0, len(opts), 2):
