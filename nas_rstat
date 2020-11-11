@@ -35,10 +35,9 @@ pbs_conf = ifl.cvar.pbs_conf
 verbose = 0
 args = None
 opts_W = list()
-default_fields = ['name', 'queue', 'user', 'state', 'start', 'duration', 'end']
 
 def main():
-    global verbose, args, opts_W, default_fields
+    global verbose, args, opts_W
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, 30):
         try:
@@ -65,6 +64,7 @@ def main():
 
     args = parser.parse_args()
 
+    default_fields = ['name', 'queue', 'user', 'state', 'start', 'duration', 'end']
     verbose = args.verbose
     levels = 0
     if args.B: levels += 1
@@ -79,8 +79,19 @@ def main():
         opts_W = list()
     if args.B:
         default_fields = ['name']
+
+    if (ifl.pbs_loadconf(0) == 0):
+        print("Cannot get PBS configuration information", file=sys.stderr)
+        return 1
+    # Load possible user or system overrides
+    more_code = load_sysexits()
+    if more_code:
+        prog = compile(more_code, 'sysexit code', 'exec')
+        exec(prog, globals(), locals())
+    sysexit_post_opts(globals(), locals())
     fmtr = NAS_field_format(default_fields, verbose, opts_W)
     fmtr.known_fields = gen_field_list()
+    sysexit_add_fields(globals(), locals())
     # Handle -W options
     (field_list, attr_list, errs) = fmtr.collect_fields()
     if (errs):
@@ -93,9 +104,6 @@ def main():
     if args.F:
         attr_list = None
     # Collect the info
-    if (ifl.pbs_loadconf(0) == 0):
-        print("Cannot get PBS configuration information", file=sys.stderr)
-        return 1
     resvs = get_resv_info(args.resvids, attr_list)
     # Display it
     if args.B:
@@ -300,6 +308,46 @@ def get_server(job_id):
         return (None, None)
     job_id_out = job_id_out + '.' + pbs_server_name
     return (job_id_out, server_out)
+
+def load_sysexits():
+    '''Load text of sysexit overrides
+
+    Returns:
+        Catenation of all sysexit file contents
+    '''
+    code = ''
+    # Load system sysexit, if present.
+    pbs_home = pbs_conf.pbs_home_path
+    if pbs_home:
+        path = os.path.join(pbs_home, 'lib', 'site', 'rstat_sysexits')
+        try:
+            if os.stat(path):
+                with open(path) as f:
+                    code += f.read()
+        except FileNotFoundError:
+            pass
+    # Append any user's sysexit code
+    home = os.path.expanduser('~')
+    if home != None:
+        path = os.path.join(home, '.rstat_sysexits')
+        try:
+            if os.stat(path):
+                with open(path) as f:
+                    code += f.read()
+        except FileNotFoundError:
+            pass
+    return code
+
+# Dummy sysexit routines that can be overridden by user/system
+
+def sysexit_post_opts(g, l):
+    pass
+
+def sysexit_add_fields(g, l):
+    pass
+
+def sysexit_post_statresv(g, l):
+    pass
 
 if __name__ == '__main__':
     sys.exit(main())
