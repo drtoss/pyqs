@@ -20,7 +20,7 @@ PBS_EXEC = os.environ.get('PBS_EXEC', '/PBS')
 sys.path.append(os.path.join(PBS_EXEC, 'lib', 'site'))
 
 import pbs_ifl as ifl
-from utils import BatchUtils
+from nas_utils import *
 import nas_layout as layout
 import nas_field_format
 from nas_field_format import NAS_field_format,gen_field
@@ -206,6 +206,7 @@ def gen_field_list():
     fl.append(gen_field('select', 'Select', None, 'fmt_by_name', 'Resource_List'))
     fl.append(gen_field('sselect', 'SSelect', None, 'fmt_by_attr', 'schedselect'))
     fl.append(gen_field('nodect', 'Nodect', {'hj': 'r'}, 'fmt_by_name', 'Resource_List'))
+    fl.append(gen_field('model', 'Model', None, 'fmt_model', 'schedselect'))
     fl.append(gen_field('id', 'Resv ID', None, 'fmt_id', None))
     return fl
 

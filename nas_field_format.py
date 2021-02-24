@@ -213,6 +213,16 @@ def fmt_id(fi, info, opts):
         return rawv
     return rawv.split('.')[0]
 
+def fmt_model(fi, info, opts):
+    # Raw format: 4:ncpus=3:model=sky_gpu:bigmem=false
+    rawv = fmt_by_attr(fi, info, opts)
+    if '-r' in opts or rawv== '--':
+        return rawv
+    mo = re.search(r'model=(\w+)', rawv)
+    if (mo):
+        return mo.group(1)
+    return '--'
+
 def fmt_name(fi, info, opts):
     return fmt_by_attr(fi, info, opts)
 
