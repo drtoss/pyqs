@@ -98,6 +98,7 @@ def main():
     default_fields = ['jobid', 'user', 'queue', 'jobname', 'tsk', 'nds', 'reqdwallt']
     if args.Q:
         default_fields = ['q_name', 'q_ncpus', 'q_time', 'q_counts', 'q_pr', 'q_info']
+        default_fields = ['q_name', 'q_ncpus', 'q_ncpus_def', 'q_time', 'q_time_def']
         kf = gen_field_list_Q()
     elif args.B:
         default_fields = ['server_name', 'jm', 'state_count', 'default_queue', 'info']
@@ -177,6 +178,87 @@ def display_jobs(args, fmtr):
         print('\n'.join([x.rstrip() for x in res]))
     return 0
 
+def display_queues(args, fmtr):
+    '''Output info about queues
+
+    For each queue, generate a list of display values for each
+    selected field. Collect those lists into a list and pass it to
+    layout for display.
+    Args:
+        args = result from argparse of command line
+        fmtr = field formatter object
+    Returns: 0 on success
+    '''
+    global opts_W
+
+    cfg = layout.Config()
+    idx = 0
+    state_count_idx = -1
+    for fld in fmtr.field_list:
+        title = fld['title']
+        if not title:
+            title = fld['name']
+        cfg.add_field(title, **fld['format'])
+        if fld['func'] == 'fmt_state_count':
+            state_count_idx = idx
+        idx += 1
+    rows = []
+    info = []
+    # Get info about queues
+    if args.things == None or len(args.things) == 0:
+        conn = ifl.pbs_connect('')
+        if conn < 0:
+            print("Cannot connect to PBS server: %s" % ifl.pbs_Errno(),
+                    file = sys.stderr)
+            return 1
+        bs = ifl.pbs_statque(conn, '', fmtr.atl, None)
+        ifl.pbs_disconnect(conn)
+        info.extend(bs)
+    else:
+        prev = None
+        conn = -1
+        for thing in args.things:
+            parts = thing.split('@')
+            if len(parts) < 2:
+                parts.extend('')
+            (qname, svr) = parts[0:2]
+            if svr != prev:
+                if conn != -1:
+                    ifl.pbs_disconnect(conn)
+                conn = ifl.pbs_connect(svr)
+                if conn == -1:
+                    print("Cannot connect to PBS server %s: %s" %
+                        (svr, ifl.pbs_Errno()), file = sys.stderr)
+                    prev = None
+                    continue
+            bs = ifl.pbs_statserver(conn, qname, fmtr.atl, None)
+            if len(bs) == 0:
+                continue
+            info.extend(bs)
+        if conn != -1:
+            ifl.pbs_disconnect(conn)
+    # Deal with state_count field by patching field title and
+    # adding 'pretty_sc' attribute to each server
+    if state_count_idx >= 0:
+        scounts = pretty_state_counts(info)
+        fs = cfg.config[state_count_idx]
+        fs.title[1] = scounts[0]
+        idx = 1
+        for svr in info:
+            svr['pretty_sc'] = scounts[idx]
+            idx += 1
+    for svr in info:
+        row = list()
+        for f in fmtr.field_list:
+            func = getattr(nas_field_format, f['func'])
+            row.append(func(f, svr, opts_W))
+        rows.append(row)
+    if rows:
+        show_hdr = '-h' not in opts_W
+        res = layout.layout(cfg, rows, show_hdr=show_hdr)
+        print('\n'.join([x.rstrip() for x in res]))
+    return 0
+
 def display_servers(args, fmtr):
     '''Output info about servers
 
@@ -191,46 +273,61 @@ def display_servers(args, fmtr):
     global opts_W
 
     cfg = layout.Config()
+    idx = 0
+    state_count_idx = -1
     for fld in fmtr.field_list:
         title = fld['title']
         if not title:
             title = fld['name']
         cfg.add_field(title, **fld['format'])
+        if fld['func'] == 'fmt_state_count':
+            state_count_idx = idx
+        idx += 1
     rows = []
     info = []
     # Get info about servers
     if args.things == None or len(args.things) == 0:
-        c = ifl.pbs_connect('')
-        if c == None:
+        conn = ifl.pbs_connect('')
+        if conn < 0:
+            print("Cannot connect to PBS server: %s" % ifl.pbs_Errno(),
+                    file = sys.stderr)
             return 1
-        bs = ifl.pbs_statserver(c, fmtr.atl, None)
-        ifl.pbs_disconnect(c)
+        bs = ifl.pbs_statserver(conn, fmtr.atl, None)
+        ifl.pbs_disconnect(conn)
         info.extend(bs)
     else:
         prev = ''
-        c = -1
+        conn = -1
         for thing in args.things:
             if thing != prev:
-                ifl.pbs_disconnect(c)
-            c = ifl.pbs_connect(thing)
-            if c == None:
-                print('XXX')
+                ifl.pbs_disconnect(conn)
+            conn = ifl.pbs_connect(thing)
+            if conn == None:
+                print("Cannot connect to PBS server %s: %s" %
+                    (thing, ifl.pbs_Errno()), file = sys.stderr)
                 continue
-            bs = ifl.pbs_statserver(c, fmtr.atl, None)
-            info.append(bs)
-        if c != -1:
-            ifl.pbs_disconnect(c)
-    print(info)
+            bs = ifl.pbs_statserver(conn, fmtr.atl, None)
+            info.extend(bs)
+        if conn != -1:
+            ifl.pbs_disconnect(conn)
+    # Deal with state_count field by patching field title and
+    # adding 'pretty_sc' attribute to each server
+    if state_count_idx >= 0:
+        scounts = pretty_state_counts(info)
+        fs = cfg.config[state_count_idx]
+        fs.title[1] = scounts[0]
+        idx = 1
+        for svr in info:
+            svr['pretty_sc'] = scounts[idx]
+            idx += 1
     for svr in info:
         row = list()
         for f in fmtr.field_list:
             func = getattr(nas_field_format, f['func'])
             row.append(func(f, svr, opts_W))
         rows.append(row)
-    print(rows)
     if rows:
         show_hdr = '-h' not in opts_W
-        print('Got to here')
         res = layout.layout(cfg, rows, show_hdr=show_hdr)
         print('\n'.join([x.rstrip() for x in res]))
     return 0
@@ -246,17 +343,17 @@ def gen_field_list():
         sources: reservation attributes whose values are needed by func
     '''
     fl = []
-    fl.append(gen_field('acct', 'Acct', None, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('aoe', 'AOE', None, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('cnt', 'Cnt', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('cpct', 'Cpct', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('cput', 'Cput', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('ctime', 'Ctime', None, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('eff', 'Eff', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('elapwallt', 'Elap wallt', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('eligtime', 'Elig time', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('endtime', 'Endtime', {'hj':'l', 'rj':'l'}, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('eststart', 'Est start', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('acct', 'Acct', None, 'fmt_by_attr', 'Account_Name'))
+    fl.append(gen_field('aoe', 'AOE', None, 'fmt_by_attr', 'schedselect'))
+    fl.append(gen_field('cnt', 'Cnt', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', None))
+    fl.append(gen_field('cpct', 'Cpct', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'resources_used'))
+    fl.append(gen_field('cput', 'Cput', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'resources_used'))
+    fl.append(gen_field('ctime', 'Ctime', None, 'fmt_by_attr', 'ctime'))
+    fl.append(gen_field('eff', 'Eff', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'resources_used'))
+    fl.append(gen_field('elapwallt', 'Elap wallt', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'walltime'))
+    fl.append(gen_field('eligtime', 'Elig time', {'hj':'r', 'rj':'r'}, 'fmt_elig_time', 'eligible_time'))
+    fl.append(gen_field('endtime', 'Endtime', {'hj':'l', 'rj':'l'}, 'fmt_end_time', 'estimated-start_time Resource_List resources_used'))
+    fl.append(gen_field('eststart', 'Est start', {'hj':'r', 'rj':'r'}, 'fmt_future_date', 'estimated-start_time'))
     fl.append(gen_field('exitstatus', 'Exit status', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
     fl.append(gen_field('group', 'Group', None, 'fmt_by_attr', 'farfle'))
     fl.append(gen_field('jobid', 'JobID', None, 'fmt_by_attr', 'farfle'))
@@ -295,9 +392,26 @@ def gen_field_list_B():
     dfr = {'dj': 'r', 'df': '='}
     fl.append(gen_field('server_name', ['Server','name'], df, 'fmt_id', None))
     fl.append(gen_field('jm', 'jm', dfr, 'fmt_by_attr', 'max_running'))
-    fl.append(gen_field('state_count', ['State count', ''], df, 'fmt_states', 'state_count'))
+    fl.append(gen_field('state_count', ['State count', ''], df, 'fmt_state_count', 'state_count'))
     fl.append(gen_field('default_queue', ['Default','queue'], df, 'fmt_by_attr', 'default_queue'))
-    fl.append(gen_field('info', 'Info', df, 'fmt_server_info', 'server_state,comment,scheduling'))
+    fl.append(gen_field('info', 'Info', df, 'fmt_server_info', 'server_state comment scheduling'))
+    return fl
+
+def gen_field_list_Q():
+    fl = []
+    dr = {'df': 'r'}
+    de = {'df': '='}
+    dfltf = {'hj':'r', 'hs':'/', 'df':'='}
+    dre = {'df': '='}
+    fl.append(gen_field('q_name', ['Queue','name'], de, 'fmt_id', None))
+    fl.append(gen_field('q_ncpus', ['Ncpus','max'], dfltf, 'fmt_from_rsrc',
+        'resources_max', 'ncpus'))
+    fl.append(gen_field('q_ncpus_def', 'def', dre, 'fmt_from_rsrc',
+        'resources_default', 'ncpus'))
+    fl.append(gen_field('q_time', ['Time','max'], dfltf, 'fmt_from_rsrc_tm',
+        'resources_max', 'walltime'))
+    fl.append(gen_field('q_time_def', 'def', dre, 'fmt_from_rsrc_tm',
+        'resources_default', 'walltime'))
     return fl
 
 def get_resv_info(resvids, attr_list):

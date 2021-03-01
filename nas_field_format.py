@@ -140,7 +140,7 @@ L           fl = list of field_info dictionaries describing field selected
         print("Need these attributes: %s" % ', '.join(sorted(aset)))
     return (fil, aset, '\n'.join(errlist) if errlist else None)
 
-def gen_field(name, title, form, func, source):
+def gen_field(name, title, form, func, source, opt=None):
     '''Create a field_info dict
 
     Args:
@@ -149,6 +149,7 @@ def gen_field(name, title, form, func, source):
         form = dictionary of non-default formatting options for field
         func = name of function to calculate display value of field
         source = list of PBS attributes used by func
+        opt = additional info for use by func
     '''
     if form is None:
         form = {}
@@ -160,7 +161,8 @@ def gen_field(name, title, form, func, source):
         'title': title,
         'format': form,
         'func': func,
-        'sources': source.split() if source else None
+        'sources': source.split() if source else None,
+        'opt': opt
         }
     return fi
 
@@ -207,6 +209,23 @@ def fmt_duration(fi, info, opts):
         return rawv
     return secstoclock(int(rawv))
 
+def fmt_from_rsrc(fi, info, opts):
+    # Pick one item out of a resource list
+    src = fi['sources'][0]
+    key = fi['opt']
+    rawv = info.get(src + '.' + key, '--')
+    return rawv
+
+def fmt_from_rsrc_tm(fi, info, opts):
+    # Pick one duration item out of a resource list
+    src = fi['sources'][0]
+    key = fi['opt']
+    rawv = info.get(src + '.' + key, '--')
+    if rawv == '--':
+        return '--'
+    t = secstoclock(clocktosecs(rawv))
+    return t
+
 def fmt_id(fi, info, opts):
     rawv = info['id']
     if '-r' in opts or rawv == '--':
@@ -240,23 +259,29 @@ def fmt_nodes(fi, info, opts):
     return ",".join(nodes)
 
 def fmt_server_info(fi, info, opts):
+    # Select interesting info about server status
     stuff = []
     t = info.get('server_state', None)
     if t and not t in ['Active', 'Idle']:
         stuff.append(t)
     t = info.get('scheduling', None)
     if t and not t == 'True':
-        stuff.append(t)
+        stuff.append("Scheduling stopped")
     t = info.get('comment', None)
     if t and not t == '':
         stuff.append(t)
     return " ".join(stuff)
 
-def fmt_state(fi, info, opts):
+def fmt_resv_state(fi, info, opts):
     rawv = fmt_by_attr(fi, info, opts)
     if '-r' in opts or rawv == '--':
         return rawv
     return decode_resv_state(rawv)
+
+def fmt_state_count(fi, info, opts):
+    # State counts already formatted into pretty_sc attribute
+    t = info.get('pretty_sc', '--')
+    return t
 
 def decode_resv_state(rawv):
     return ("--",  "UN", "CO", "WT", "TR", "RN", "FN", "BD", "DE", "DJ", "DG", "AL", "IC")[int(rawv)]
@@ -269,11 +294,33 @@ def decode_resv_state_full(rawv):
             "RESV_IN_CONFLICT")[int(rawv)]
 
 def fmt_user(fi, info, opts):
+    # Raw format: user@host, or just user
     rawv = fmt_by_attr(fi, info, opts)
     # If -W -r, return raw value
     if '-r' in opts or rawv == '--':
         return rawv
     return rawv.split('@')[0]
+
+clockre = re.compile(r'((\d+)\+)?(\d+):(\d+)(:(\d+))?$')
+def clocktosecs(v):
+    '''Convert clock time string to integer seconds
+
+    Args:
+        v = time, in format [days+]hh:mm[:ss]
+    '''
+    if v in [None, '', '--']:
+        return v
+    if v.isdigit():
+        return int(v)
+    mo = clockre.match(v)
+    if not mo:
+        return '--'
+    (days, hours, minutes, seconds) = mo.group(2,3,4,6)
+    days = int(days) if days else 0
+    hours = int(hours) if hours else 0
+    minutes = int(minutes) if minutes else 0
+    seconds = int(seconds) if seconds else 0
+    return seconds + 60 * (minutes + 60 * (hours + 24 * days))
 
 def secstoclock(v, sf=False, df=False):
     '''Convert time in seconds for display
