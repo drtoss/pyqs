@@ -21,6 +21,7 @@ sys.path.append(os.path.join(PBS_EXEC, 'lib', 'site'))
 
 import pbs_ifl as ifl
 from nas_utils import *
+from nas_pbsutil import get_server
 import nas_layout as layout
 import nas_field_format
 from nas_field_format import NAS_field_format,gen_field
@@ -263,52 +264,6 @@ def get_resv_info(resvids, attr_list):
     if verbose > 1:
         print (bs)
     return bs
-
-def get_server(job_id):
-    '''Split job ID into its pieces
-
-    Also works for reservations.
-    Args:
-        job_id = job id in one of its various forms
-    Returns:
-        (job_id, server) tuple
-        job_id will be None on error
-    Based on C routine by the same name.
-    '''
-    job_id = job_id.strip()
-    if job_id.startswith('@'):
-        return (None, job_id[1:])
-    server_out = None
-    pbs_server_name = pbs_conf.pbs_server_name
-    (seq_num, parent_server, current_server) = parse_jobid(job_id)
-    if seq_num == None:
-        return (None, None)
-    if parent_server and not pbs_server_name:
-        pbs_server_name = parent_server
-        server_out = parent_server
-    if current_server:
-        server_out = current_server
-    job_id_out = seq_num
-    if parent_server:
-        if pbs_server_name:
-            s = parent_server.lower()
-            t = pbs_server_name.lower()
-            if s == t:
-                job_id_out = job_id_out + '.' + pbs_server_name
-                return (job_id_out, server_out)
-            try:
-                (hname, alias, ipaddr) = socket.gethostbyname_ex(parent_server)
-                parent_server = hname
-            except:
-                pass
-            job_id_out = job_id_out + '.' + parent_server
-            if not server_out:
-                server_out = parent_server
-            return (job_id_out, server_out)
-    if not pbs_server_name:
-        return (None, None)
-    job_id_out = job_id_out + '.' + pbs_server_name
-    return (job_id_out, server_out)
 
 def load_sysexits():
     '''Load text of sysexit overrides
