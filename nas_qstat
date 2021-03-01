@@ -97,8 +97,7 @@ def main():
 
     default_fields = ['jobid', 'user', 'queue', 'jobname', 'tsk', 'nds', 'reqdwallt']
     if args.Q:
-        default_fields = ['q_name', 'q_ncpus', 'q_time', 'q_counts', 'q_pr', 'q_info']
-        default_fields = ['q_name', 'q_ncpus', 'q_ncpus_def', 'q_time', 'q_time_def']
+        default_fields = ['q_name', 'q_ncpus', 'q_ncpus_def', 'q_time', 'q_time_def', 'q_jm', 'state_count', 'q_pr', 'q_info']
         kf = gen_field_list_Q()
     elif args.B:
         default_fields = ['server_name', 'jm', 'state_count', 'default_queue', 'info']
@@ -220,7 +219,7 @@ def display_queues(args, fmtr):
         for thing in args.things:
             parts = thing.split('@')
             if len(parts) < 2:
-                parts.extend('')
+                parts.append('')
             (qname, svr) = parts[0:2]
             if svr != prev:
                 if conn != -1:
@@ -231,7 +230,8 @@ def display_queues(args, fmtr):
                         (svr, ifl.pbs_Errno()), file = sys.stderr)
                     prev = None
                     continue
-            bs = ifl.pbs_statserver(conn, qname, fmtr.atl, None)
+                prev = svr
+            bs = ifl.pbs_statque(conn, qname, fmtr.atl, None)
             if len(bs) == 0:
                 continue
             info.extend(bs)
@@ -296,17 +296,22 @@ def display_servers(args, fmtr):
         ifl.pbs_disconnect(conn)
         info.extend(bs)
     else:
-        prev = ''
+        prev = None
         conn = -1
         for thing in args.things:
             if thing != prev:
-                ifl.pbs_disconnect(conn)
-            conn = ifl.pbs_connect(thing)
-            if conn == None:
-                print("Cannot connect to PBS server %s: %s" %
-                    (thing, ifl.pbs_Errno()), file = sys.stderr)
-                continue
+                if conn != -1:
+                    ifl.pbs_disconnect(conn)
+                conn = ifl.pbs_connect(thing)
+                if conn == -1:
+                    print("Cannot connect to PBS server %s: %s" %
+                        (thing, ifl.pbs_Errno()), file = sys.stderr)
+                    prev = None
+                    continue
+                prev = thing
             bs = ifl.pbs_statserver(conn, fmtr.atl, None)
+            if len(bs) == 0:
+                continue
             info.extend(bs)
         if conn != -1:
             ifl.pbs_disconnect(conn)
@@ -388,30 +393,36 @@ def gen_field_list():
 
 def gen_field_list_B():
     fl = []
-    df = {'df': '='}
-    dfr = {'dj': 'r', 'df': '='}
-    fl.append(gen_field('server_name', ['Server','name'], df, 'fmt_id', None))
-    fl.append(gen_field('jm', 'jm', dfr, 'fmt_by_attr', 'max_running'))
-    fl.append(gen_field('state_count', ['State count', ''], df, 'fmt_state_count', 'state_count'))
-    fl.append(gen_field('default_queue', ['Default','queue'], df, 'fmt_by_attr', 'default_queue'))
-    fl.append(gen_field('info', 'Info', df, 'fmt_server_info', 'server_state comment scheduling'))
+    dr = {'dj': 'r'}
+    de = {'df': '='}
+    dre = {'dj': 'r', 'df': '='}
+    fl.append(gen_field('server_name', ['Server','name'], de, 'fmt_id', None))
+    fl.append(gen_field('jm', 'jm', dre, 'fmt_by_attr', 'max_running'))
+    fl.append(gen_field('state_count', ['State count', ''], de, 'fmt_state_count', 'state_count'))
+    fl.append(gen_field('default_queue', ['Default','queue'], de, 'fmt_by_attr', 'default_queue'))
+    fl.append(gen_field('info', 'Info', de, 'fmt_server_info', 'server_state comment scheduling'))
     return fl
 
 def gen_field_list_Q():
     fl = []
-    dr = {'df': 'r'}
+    rr = {'rj': 'r'}
     de = {'df': '='}
+    dre = {'rj': 'r', 'df': '='}
+    dle = {'rj': 'l', 'df': '='}
     dfltf = {'hj':'r', 'hs':'/', 'df':'='}
-    dre = {'df': '='}
     fl.append(gen_field('q_name', ['Queue','name'], de, 'fmt_id', None))
     fl.append(gen_field('q_ncpus', ['Ncpus','max'], dfltf, 'fmt_from_rsrc',
         'resources_max', 'ncpus'))
-    fl.append(gen_field('q_ncpus_def', 'def', dre, 'fmt_from_rsrc',
+    fl.append(gen_field('q_ncpus_def', 'def', dle, 'fmt_from_rsrc',
         'resources_default', 'ncpus'))
     fl.append(gen_field('q_time', ['Time','max'], dfltf, 'fmt_from_rsrc_tm',
         'resources_max', 'walltime'))
-    fl.append(gen_field('q_time_def', 'def', dre, 'fmt_from_rsrc_tm',
+    fl.append(gen_field('q_time_def', 'def', dle, 'fmt_from_rsrc_tm',
         'resources_default', 'walltime'))
+    fl.append(gen_field('q_jm', 'jm', dre, 'fmt_by_attr', 'max_running'))
+    fl.append(gen_field('state_count', ['State count', ''], de, 'fmt_state_count', 'state_count'))
+    fl.append(gen_field('q_pr', 'pr', dre, 'fmt_by_attr', 'Priority'))
+    fl.append(gen_field('q_info', 'Info', de, 'fmt_queue_info', 'enabled started'))
     return fl
 
 def get_resv_info(resvids, attr_list):

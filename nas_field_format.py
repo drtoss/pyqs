@@ -258,6 +258,17 @@ def fmt_nodes(fi, info, opts):
             nodes.append(mo.group(1))
     return ",".join(nodes)
 
+def fmt_queue_info(fi, info, opts):
+    # Select interesting info about queue status
+    stuff = []
+    t = info.get('enabled', None)
+    if t != 'True':
+        stuff.append('disabled')
+    t = info.get('started', None)
+    if t != 'True':
+        stuff.append('stopped')
+    return " ".join(stuff)
+
 def fmt_server_info(fi, info, opts):
     # Select interesting info about server status
     stuff = []
