@@ -196,7 +196,7 @@ def gen_field_list():
     fl.append(gen_field('name', 'Name', None, 'fmt_by_attr', 'Reserve_Name'))
     fl.append(gen_field('queue', 'Queue', None, 'fmt_by_name', 'queue'))
     fl.append(gen_field('user', 'User', None, 'fmt_user', 'Reserve_Owner'))
-    fl.append(gen_field('state', 'State', None, 'fmt_state', 'reserve_state'))
+    fl.append(gen_field('state', 'State', None, 'fmt_resv_state', 'reserve_state'))
     fl.append(gen_field('start', 'Start', {'hj':'r'}, 'fmt_date', 'reserve_start'))
     fl.append(gen_field('duration', 'Duration', {'hj':'r'}, 'fmt_duration', 'reserve_duration'))
     fl.append(gen_field('end', 'End', None, 'fmt_date', 'reserve_end'))
