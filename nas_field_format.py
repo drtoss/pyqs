@@ -1,10 +1,4 @@
 #!/usr/bin/python3
-# $Header:$
-#Author:dtalcott
-#Purpose:Routine to generate qstat or rstat formatted output
-#Last-modified: $Author: dtalcott $ on $Date: 2020/06/13 12:09:40 $
-#Reviewed-by: 
-#Reviewed-on: 
 
 import re
 import time
@@ -136,7 +130,12 @@ L           fl = list of field_info dictionaries describing field selected
         errlist.append("Unknown field name%s: %s" % (plural, ', '.join(sorted(unknowns))))
         errlist.append("Known fields are: %s" % ', '.join(sorted(knowns)))
     fil = [knownmap[x] for x in fl if x in knownmap]
-    aset = set(list([x['sources'] for x in fil if x['sources'] != '']))
+    alist = list()
+    for x in fil:
+        t = x['sources']
+        if t:
+            alist.extend(t)
+    aset = set(alist)
     if self.verbose:
         print("Need these attributes: %s" % ', '.join(sorted(aset)))
     return (fil, aset, '\n'.join(errlist) if errlist else None)
@@ -149,7 +148,7 @@ def gen_field(name, title, form, func, source):
         title = display title for field
         form = dictionary of non-default formatting options for field
         func = name of function to calculate display value of field
-        source = PBS attributes used to by func
+        source = list of PBS attributes used by func
     '''
     if form is None:
         form = {}
@@ -161,7 +160,7 @@ def gen_field(name, title, form, func, source):
         'title': title,
         'format': form,
         'func': func,
-        'sources': source
+        'sources': source.split() if source else None
         }
     return fi
 
@@ -173,7 +172,8 @@ def gen_field(name, title, form, func, source):
 #   opts = dict of formatting options
 
 def fmt_by_attr(fi, info, opts):
-    attr_name = fi['sources']
+    t = fi['sources']
+    attr_name = t[0] if t else None
     return fmt_by_name(fi, info, opts, attr_name)
 
 def fmt_by_name(fi, info, opts, name=None):
@@ -238,6 +238,19 @@ def fmt_nodes(fi, info, opts):
         if mo:
             nodes.append(mo.group(1))
     return ",".join(nodes)
+
+def fmt_server_info(fi, info, opts):
+    stuff = []
+    t = info.get('server_state', None)
+    if t and not t in ['Active', 'Idle']:
+        stuff.append(t)
+    t = info.get('scheduling', None)
+    if t and not t == 'True':
+        stuff.append(t)
+    t = info.get('comment', None)
+    if t and not t == '':
+        stuff.append(t)
+    return " ".join(stuff)
 
 def fmt_state(fi, info, opts):
     rawv = fmt_by_attr(fi, info, opts)
