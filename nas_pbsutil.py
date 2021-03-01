@@ -22,7 +22,7 @@ def get_server(job_id):
         return (None, job_id[1:])
     server_out = None
     pbs_server_name = pbs_conf.pbs_server_name
-    (seq_num, parent_server, current_server) = parse_jobid(job_id)
+    (seq_num, parent_server, current_server, _, _) = parse_jobid(job_id)
     if seq_num == None:
         return (None, None)
     if parent_server and not pbs_server_name:
@@ -52,33 +52,48 @@ def get_server(job_id):
     job_id_out = job_id_out + '.' + pbs_server_name
     return (job_id_out, server_out)
 
+patt = \
+        r'((?P<seq>[0-9]+)(?P<idx>\[[0-9]*\])?)?' \
+        r'(\.(?P<parent>[^\s@]+))?' \
+        r'(@(?P<current>[^\s@]+))?' \
+        r'$'
+comp = re.compile(patt)
+
 def parse_jobid(job_id):
-    '''Split jobid into its pieces
+    '''Split job ID into its pieces
 
     Also works for reservations.
     Args:
-        job_id = Job ID, in form seqno[.parent_server][@current_server]
+        job_id = job id in one of its various forms
     Returns:
-        (seqno, parent, current)
+        None if invalid form, else
+        (seq_num, parent_server, current_server, array_idx, resv_type) tuple
+    Based on C routine by the same name in qstat.c
     '''
     if job_id == None:
         return None
-    patt = r'(?P<type>[RSM])?' + \
-        r'(?P<seqno>\d+)' + \
-        r'(?P<sub>\[\d*\])?' + \
-        r'(\.(?P<parent>[^@]*))?' + \
-        r'(@(?P<current>.*))?' + \
-        r'$'
+    job_id = job_id.strip()
+    seq_num = None
+    parent = None
+    current = None
+    array_idx = None
+    resv_type = None
+    # Deal with reservation type prefix
+    if job_id[0] in 'RSM':
+        resv_type = job_id[0]
+        job_id = job_id[1:]
+    mo = comp.match(job_id)
+    if not mo:
+        return None
+    seq_num = mo.group('seq')
+    parent = mo.group('parent')
+    current = mo.group('current')
+    array_idx = mo.group('idx')
+    # Cannot have array index on reservation
+    if resv_type != None and array_idx != None:
+        return None
 
-    mo = re.match(patt, job_id)
-    if mo:
-        mod = mo.groupdict(default = '')
-        jid = mod['type'] + mod['seqno'] + mod['sub']
-        parent = mo.group('parent')
-        current = mo.group('current')
-    else:
-        return (None, None, None)
-    return (jid, parent, current)
+    return (seq_num, parent, current, array_idx, resv_type)
 
 def load_sysexits(prefix):
     '''Load text of sysexit overrides
