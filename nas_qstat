@@ -1,0 +1,396 @@
+#!/PBS/bin/pbs_python
+# $Header:$
+#Author:dtalcott
+#Purpose:Python equivalent of qstat, but with options for how
+#Purpose:to display the output.
+#Purpose:Use --help for details.
+#Last-modified: $Author: dtalcott $ on $Date: 2020/06/13 12:09:40 $
+#Reviewed-by: 
+#Reviewed-on: 
+
+import sys
+import os
+import argparse
+import re
+import subprocess
+import socket
+import time
+
+PBS_EXEC = os.environ.get('PBS_EXEC', '/PBS')
+sys.path.append(os.path.join(PBS_EXEC, 'lib', 'site'))
+
+import pbs_ifl as ifl
+from nas_utils import BatchUtils
+from nas_pbsutil import *
+import nas_layout as layout
+import nas_field_format
+from nas_field_format import NAS_field_format,gen_field
+
+long_desc = '''Display information about jobs, queues, or servers
+
+This command displays information about PBS jobs, queues, or servers,
+writing the status to standard output. It is similar to PBS's qstat, but
+provides more options for selecting and formatting the output.
+'''
+
+pbs_conf = ifl.cvar.pbs_conf
+verbose = 0
+args = None
+opts_W = list()
+
+def main():
+    global verbose, args, opts_W
+    # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
+    for i in range(1, 30):
+        try:
+            signal.signal(i, signal.SIG_DFL)
+        except:
+            pass
+    prog = sys.argv[0].split('/')[-1]
+    parser = argparse.ArgumentParser(description=long_desc, prog=prog,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--version', action='version',
+        version='%(prog)s $Id:$')
+    parser.add_argument('-A', default=False, action='store_true',
+        help='Select Altair default field list')
+    parser.add_argument('-B', default=False, action='store_true',
+        help='Display information for servers')
+    parser.add_argument('-Q', default=False, action='store_true',
+        help='Display information for queues')
+    parser.add_argument('-E', default=False, action='store_true',
+        help='Sort jobs by server and job id')
+    parser.add_argument('-J', default=False, action='store_true',
+        help='Display status information for job arrays')
+    parser.add_argument('-t', default=False, action='store_true',
+        help='Display status information for jobs, job_arrays, and subjobs')
+    parser.add_argument('-p', default=False, action='store_true',
+        help='Replace Time Use column with percentage complete')
+    parser.add_argument('-x', default=False, action='store_true',
+        help='Include finished and moved jobs')
+    parser.add_argument('-a', default=False, action='store_true',
+        help='Display all jobs')
+    parser.add_argument('-H', default=False, action='store_true',
+        help='Select only finished or moved jobs')
+    parser.add_argument('-i', default=False, action='store_true',
+        help='Select queued, held, or waiting jobs')
+    parser.add_argument('-n', default=False, action='store_true',
+        help='Include exec_host information')
+    parser.add_argument('-r', default=False, action='store_true',
+        help='Select running or suspended jobs')
+    parser.add_argument('-s', default=False, action='store_true',
+        help='Include job comment')
+    parser.add_argument('-T', default=False, action='store_true',
+        help='Replace Elap Time with estimated start time')
+    parser.add_argument('-W', action='append', metavar='display option',
+        help='options affecting field selection and disply. See qstat.1B')
+    parser.add_argument('--verbose', '-v', default=0, action='count',
+        help='increase debugging verbosity')
+    parser.add_argument('things', nargs=argparse.REMAINDER,
+        help='Jobs, queues, or servers to status')
+
+    args = parser.parse_args()
+    verbose = args.verbose
+
+    if (ifl.pbs_loadconf(0) == 0):
+        print("Cannot get PBS configuration information", file=sys.stderr)
+        return 1
+
+    default_fields = ['jobid', 'user', 'queue', 'jobname', 'tsk', 'nds', 'reqdwallt']
+    if args.Q:
+        default_fields = ['q_name', 'q_ncpus', 'q_time', 'q_counts', 'q_pr', 'q_info']
+        kf = gen_field_list_Q()
+    elif args.B:
+        default_fields = ['server_name', 'jm', 'state_count', 'default_queue', 'info']
+        if args.A:
+            default_fields = ['server', 'max', 'tot', 'que', 'run', 'hld', 'wat', 'trn', 'ext', 'status']
+        kf = gen_field_list_B()
+    else:
+        default_fields = ['jobid', 'user', 'queue', 'jobname', 'tsk', 'nds',
+            'reqdwallt']
+        kf = gen_field_list()
+
+    # Build list of known fields
+    opts_W = args.W
+    if opts_W is None:
+        opts_W = list()
+    # Load possible user or system overrides
+    more_code = load_sysexits('qstat')
+    if more_code:
+        prog = compile(more_code, 'sysexit code', 'exec')
+        exec(prog, globals(), locals())
+    sysexit_post_opts(globals(), locals())
+    fmtr = NAS_field_format(default_fields, verbose, opts_W)
+    fmtr.known_fields = kf
+    sysexit_add_fields(globals(), locals())
+
+    # Handle -W options
+    (field_list, attr_list, errs) = fmtr.collect_fields()
+    if (errs):
+        print(errs, file = sys.stderr)
+    rc = fmtr.adjust_formats(field_list)
+    if rc != True:
+        print(rc, file=sys.stderr)
+        return 1
+    fmtr.field_list = field_list
+    bu = BatchUtils()
+    t = (','.join(attr_list)).split(',')
+    atl = bu.list_to_attrl(t)
+    fmtr.atl = atl
+
+    if args.Q:
+        rc = display_queues(args, fmtr)
+    elif args.B:
+        rc = display_servers(args, fmtr)
+    else:
+        rc = display_jobs(args, fmtr)
+    return rc
+
+def display_jobs(args, fmtr):
+    '''Output info in standard format
+
+    For each job, generate a list of display values for each
+    selected field. Collect those lists into a list and pass it to
+    layout for display.
+    Args:
+        args = result from argparse of command line
+        fmtr = field formatter object
+    Returns: 0 on success
+    '''
+    global opts_W
+
+    c = layout.Config()
+    for fld in fmtr.field_list:
+        title = fld['title']
+        if not title:
+            title = fld['name']
+        c.add_field(title, **fld['format'])
+    rows = list()
+    for resv in resvs:
+        row = list()
+        for f in fmtr.field_list:
+            func = getattr(nas_field_format, f['func'])
+            row.append(func(f, resv, opts_W))
+        rows.append(row)
+    if rows:
+        show_hdr = '-h' not in opts_W
+        res = layout.layout(c, rows, show_hdr=show_hdr)
+        print('\n'.join([x.rstrip() for x in res]))
+    return 0
+
+def display_servers(args, fmtr):
+    '''Output info about servers
+
+    For each server, generate a list of display values for each
+    selected field. Collect those lists into a list and pass it to
+    layout for display.
+    Args:
+        args = result from argparse of command line
+        fmtr = field formatter object
+    Returns: 0 on success
+    '''
+    global opts_W
+
+    cfg = layout.Config()
+    for fld in fmtr.field_list:
+        title = fld['title']
+        if not title:
+            title = fld['name']
+        cfg.add_field(title, **fld['format'])
+    rows = []
+    info = []
+    # Get info about servers
+    if args.things == None or len(args.things) == 0:
+        c = ifl.pbs_connect('')
+        if c == None:
+            return 1
+        bs = ifl.pbs_statserver(c, fmtr.atl, None)
+        ifl.pbs_disconnect(c)
+        info.extend(bs)
+    else:
+        prev = ''
+        c = -1
+        for thing in args.things:
+            if thing != prev:
+                ifl.pbs_disconnect(c)
+            c = ifl.pbs_connect(thing)
+            if c == None:
+                print('XXX')
+                continue
+            bs = ifl.pbs_statserver(c, fmtr.atl, None)
+            info.append(bs)
+        if c != -1:
+            ifl.pbs_disconnect(c)
+    print(info)
+    for svr in info:
+        row = list()
+        for f in fmtr.field_list:
+            func = getattr(nas_field_format, f['func'])
+            row.append(func(f, svr, opts_W))
+        rows.append(row)
+    print(rows)
+    if rows:
+        show_hdr = '-h' not in opts_W
+        print('Got to here')
+        res = layout.layout(cfg, rows, show_hdr=show_hdr)
+        print('\n'.join([x.rstrip() for x in res]))
+    return 0
+
+def gen_field_list():
+    '''Generate list of known fields
+
+    Returns: list of field_info dicts for known fields
+    The dict have these key/value pairs
+        name: the name of the field
+        format: dict suitable for passing to layout.add_field()
+        func: name of function to calculate display value
+        sources: reservation attributes whose values are needed by func
+    '''
+    fl = []
+    fl.append(gen_field('acct', 'Acct', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('aoe', 'AOE', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('cnt', 'Cnt', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('cpct', 'Cpct', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('cput', 'Cput', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('ctime', 'Ctime', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('eff', 'Eff', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('elapwallt', 'Elap wallt', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('eligtime', 'Elig time', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('endtime', 'Endtime', {'hj':'l', 'rj':'l'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('eststart', 'Est start', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('exitstatus', 'Exit status', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('group', 'Group', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('jobid', 'JobID', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('jobname', 'Jobname', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('lifetime', 'Life time', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('maxwallt', 'Max wallt', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('memory', 'Memory', {'hj':'l', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('minwallt', 'Min wallt', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('mission', 'Mission', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('model', 'Model', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('nds', 'Nds', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('place', 'Place', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('pmem', 'Pmem', {'hj':'l', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('pri', 'Pri', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('qtime', 'Qtime', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('queue', 'Queue', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('rank0', 'Rank0', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('reqid', 'ReqID', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('reqmem', 'Reqmem', {'hj':'l', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('remwallt', 'Rem wallt', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('reqdwallt', 'Req\'d wallt', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('runs', 'Runs', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('s', 'S', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('sessid', 'SessID', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('seqno', 'SeqNo', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('ss', 'Ss', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('stime', 'Stime', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('tsk', 'TSK', {'hj':'r', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('user', 'User', None, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('vmem', 'Vmem', {'hj':'l', 'rj':'r'}, 'fmt_by_attr', 'farfle'))
+    return fl
+
+def gen_field_list_B():
+    fl = []
+    df = {'df': '='}
+    dfr = {'dj': 'r', 'df': '='}
+    fl.append(gen_field('server_name', ['Server','name'], df, 'fmt_id', None))
+    fl.append(gen_field('jm', 'jm', dfr, 'fmt_by_attr', 'max_running'))
+    fl.append(gen_field('state_count', ['State count', ''], df, 'fmt_states', 'state_count'))
+    fl.append(gen_field('default_queue', ['Default','queue'], df, 'fmt_by_attr', 'default_queue'))
+    fl.append(gen_field('info', 'Info', df, 'fmt_server_info', 'server_state,comment,scheduling'))
+    return fl
+
+def get_resv_info(resvids, attr_list):
+    '''Ask server for info about reservations
+
+    Args:
+        resvids = list of reservation IDs
+        attr_list = list of interesting attributes.
+    Returns:
+        List of PBS batchstatus results
+    '''
+    bu = BatchUtils()
+    if attr_list != None:
+        attr_list = (','.join(attr_list)).split(',')
+        atl = bu.list_to_attrl(list(attr_list))
+    else:
+        atl = None
+    bs = list()
+    if resvids == None or len(resvids) == 0:
+        # Ask for all reservations
+        conn = ifl.pbs_connect(None)
+        if conn < 0:
+            print("Cannot connect to PBS server: %s" % ifl.pbs_Errno(),
+                file = sys.stderr)
+            return None
+        bs = ifl.pbs_statjob(conn, None, atl, None)
+    else:
+        cur_server = None
+        conn = None
+        for resid in resvids:
+            (seq_no, server) = get_server(resid)
+            if seq_no == None and server == None:
+                print("Invalid request id:", resid, file=sys.stderr)
+                continue
+            if server == None:
+                server = pbs_conf.pbs_server_name
+            if server != cur_server:
+                if conn != None:
+                    ifl.pbs_disconnect(conn)
+                    cur_server = None
+                conn = ifl.pbs_connect(server)
+                if conn < 0:
+                    print("Cannot connect to PBS server %s: %s" % \
+                        (server, ifl.pbs_Errno()))
+                    break
+                cur_server = server
+            bs1 = ifl.pbs_statjob(conn, seq_no, atl, None)
+            if verbose > 1:
+                print(bs1)
+            bs.extend(bs1)
+    if conn != None and conn >= 0:
+        ifl.pbs_disconnect(conn)
+    if verbose > 1:
+        print (bs)
+    return bs
+
+def pretty_state_counts(ilist):
+    '''Convert state info into "pretty" output
+
+    Args:
+        ilist = List of dicts with 'state_count' attributes to be beautified
+    Returns:
+        A list of strings suitable for printing. The first element is a header
+        and the remaining are state counts, one for each element in ilist.
+    '''
+    sclist = []
+    maxsn = []
+    for info in ilist:
+        state_count = info.get('state_count', '')
+        state_names = []
+        state_cnts = []
+        for one_count in state_count.split():
+            mo = re.match(r'([A-Z])\w+:(\d+)', one_count)
+            if mo:
+                state_names.append(mo.group(1))
+                state_cnts.append(mo.group(2))
+        if len(state_names) > len(maxsn):
+            maxsn = state_names
+        sclist.append(state_cnts)
+    # Deal with no data
+    if len(maxsn) < 1:
+        return ['--'] * (len(ilist) + 1)
+    # Now, use layout to make into uniform size for all elements of ilist
+    cfg = layout.Config()
+    idx = 0
+    for sn in maxsn:
+        idx += 1
+        s = '/' if idx < len(maxsn) else ''
+        cfg.add_field(sn, hf='_', hj='r', hs=s, df='')
+    scrows = layout.layout(cfg, sclist)
+    return scrows
+
+if __name__ == '__main__':
+    sys.exit(main())
+
+# vi:ts=4:sw=4:expandtab
