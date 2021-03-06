@@ -2,6 +2,7 @@
 
 import re
 import time
+import math
 
 class NAS_field_format(object):
 
@@ -166,6 +167,15 @@ def gen_field(name, title, form, func, source, opt=None):
         }
     return fi
 
+# Module global values
+
+def set_field_vars(opts):
+    global gnow, gHopt, gropt
+
+    gnow = int(time.time())
+    gHopt = '-H' in opts
+    gropt = '-r' in opts
+
 # Functions to compute specific values for display
 # fmt_xxx(fi, info, opts)
 # Args:
@@ -191,23 +201,56 @@ def fmt_by_name(fi, info, opts, name=None):
             result = '--'
     return result
 
+def fmt_aoe(fi, info, opts):
+    rawv = fmt_by_attr(fi, info, opts)
+    mo = re.search(r'\baoe=(\w+)', rawv)
+    if (mo):
+        return mo.group(1)
+    return '--'
+
 def fmt_date(fi, info, opts):
     rawv = fmt_by_attr(fi, info, opts)
     # If -W -r, return raw value
-    if '-r' in opts or rawv == '--':
+    if gropt or rawv == '--':
         return rawv
     result = time.strftime(r'%y-%m-%d/%H:%M', time.localtime(int(rawv)))
     return result
 
-def decode_epoch_full(rawv):
-    result = time.strftime('%c', time.localtime(int(rawv)))
-    return result
-
 def fmt_duration(fi, info, opts):
     rawv = fmt_by_attr(fi, info, opts)
-    if '-r' in opts or rawv == '--':
+    if gropt or rawv == '--':
         return rawv
     return secstoclock(int(rawv))
+
+def fmt_efficiency(fi, info, opts):
+    return "TODO"
+
+def fmt_elapsed(fi, info, opts):
+    return "TODO"
+
+def fmt_elig_time(fi, info, opts):
+    rawv = info.get('eligible_time', '--')
+    showdays = not gHopt
+    return secstoclock(clocktosecs(rawv), False, showdays)
+
+def fmt_end_time(fi, info, opts):
+    guess = ''
+    start = info.get('stime', None)
+    if start == None:
+        start = info.get('estimated.start_time', None)
+        guess = '?'
+    if start == None:
+        return '--'
+    start = int(start)
+    walltime = None
+    jobstate = info.get('job_state', '?')
+    if jobstate == "F":
+        walltime = info.get('resources_used.walltime', None)
+    if walltime == None:
+        return '--'
+    wtime = clocktosecs(walltime)
+    t = time.strftime(r'%y-%m-%d/%H:%M',time.localtime(start + wtime))
+    return t + guess
 
 def fmt_from_rsrc(fi, info, opts):
     # Pick one item out of a resource list
@@ -222,22 +265,49 @@ def fmt_from_rsrc_tm(fi, info, opts):
     key = fi['opt']
     rawv = info.get(src + '.' + key, '--')
     if rawv == '--':
-        return '--'
+        return rawv
     t = secstoclock(clocktosecs(rawv))
+    return t
+
+def fmt_future_date(fi, info, opts):
+    rawv = fmt_from_rsrc(fi, info, opts)
+    if rawv == '--':
+        return rawv
+    est = int(rawv)
+    # Round to quarter hours
+    rounding = 15 * 60
+    eststart = (math.ceil(est / rounding) * rounding)
+    delta = eststart - gnow
+    if delta <= 0:
+        return '--'
+    if delta > 84600:
+        # More than 23 1/5 hours ahead -- use date format
+        t = time.strftime(r'%m/%d', time.localtime(eststart))
+        s = time.localtime(eststart)
+        ampm = 'P' if s[3] > 11 else 'A'
+        return t + ampm
+    t = time.strftime(r'%H:%M', time.localtime(eststart))
     return t
 
 def fmt_id(fi, info, opts):
     rawv = info['id']
-    if '-r' in opts or rawv == '--':
+    if gropt or rawv == '--':
         return rawv
     return rawv.split('.')[0]
+
+def fmt_jobid(fi, info, opts):
+    rawv = info['id']
+    t = rawv.split('.')
+    if len(t) <= 1:
+        return rawv
+    return t[0] + '.' + t[1]
 
 def fmt_model(fi, info, opts):
     # Raw format: 4:ncpus=3:model=sky_gpu:bigmem=false
     rawv = fmt_by_attr(fi, info, opts)
-    if '-r' in opts or rawv== '--':
+    if gropt or rawv== '--':
         return rawv
-    mo = re.search(r'model=(\w+)', rawv)
+    mo = re.search(r'\bmodel=(\w+)', rawv)
     if (mo):
         return mo.group(1)
     return '--'
@@ -248,7 +318,7 @@ def fmt_name(fi, info, opts):
 def fmt_nodes(fi, info, opts):
     # Raw format:  (r789i0n4:ncpus=1)+(r789i0n5:ncpus=1)
     rawv = fmt_by_attr(fi, info, opts)
-    if '-r' in opts or rawv == '--':
+    if gropt or rawv == '--':
         return rawv
     items = rawv.split('+')
     nodes = list()
@@ -285,7 +355,7 @@ def fmt_server_info(fi, info, opts):
 
 def fmt_resv_state(fi, info, opts):
     rawv = fmt_by_attr(fi, info, opts)
-    if '-r' in opts or rawv == '--':
+    if gropt or rawv == '--':
         return rawv
     return decode_resv_state(rawv)
 
@@ -294,23 +364,15 @@ def fmt_state_count(fi, info, opts):
     t = info.get('pretty_sc', '--')
     return t
 
-def decode_resv_state(rawv):
-    return ("--",  "UN", "CO", "WT", "TR", "RN", "FN", "BD", "DE", "DJ", "DG", "AL", "IC")[int(rawv)]
-
-def decode_resv_state_full(rawv):
-    return ("RESV_NONE", "RESV_UNCONFIRMED", "RESV_CONFIRMED",
-            "RESV_WAIT", "RESV_TIME_TO_RUN", "RESV_RUNNING",
-            "RESV_FINISHED", "RESV_BEING_DELETED", "RESV_DELETED",
-            "RESV_DELETING_JOBS", "RESV_DEGRADED", "RESV_BEING_ALTERED",
-            "RESV_IN_CONFLICT")[int(rawv)]
-
 def fmt_user(fi, info, opts):
     # Raw format: user@host, or just user
     rawv = fmt_by_attr(fi, info, opts)
     # If -W -r, return raw value
-    if '-r' in opts or rawv == '--':
+    if gropt or rawv == '--':
         return rawv
     return rawv.split('@')[0]
+
+# Misc helper functions for formatting routines
 
 clockre = re.compile(r'((\d+)\+)?(\d+):(\d+)(:(\d+))?$')
 def clocktosecs(v):
@@ -332,6 +394,20 @@ def clocktosecs(v):
     minutes = int(minutes) if minutes else 0
     seconds = int(seconds) if seconds else 0
     return seconds + 60 * (minutes + 60 * (hours + 24 * days))
+
+def decode_epoch_full(rawv):
+    result = time.strftime('%c', time.localtime(int(rawv)))
+    return result
+
+def decode_resv_state(rawv):
+    return ("--",  "UN", "CO", "WT", "TR", "RN", "FN", "BD", "DE", "DJ", "DG", "AL", "IC")[int(rawv)]
+
+def decode_resv_state_full(rawv):
+    return ("RESV_NONE", "RESV_UNCONFIRMED", "RESV_CONFIRMED",
+            "RESV_WAIT", "RESV_TIME_TO_RUN", "RESV_RUNNING",
+            "RESV_FINISHED", "RESV_BEING_DELETED", "RESV_DELETED",
+            "RESV_DELETING_JOBS", "RESV_DEGRADED", "RESV_BEING_ALTERED",
+            "RESV_IN_CONFLICT")[int(rawv)]
 
 def secstoclock(v, sf=False, df=False):
     '''Convert time in seconds for display
