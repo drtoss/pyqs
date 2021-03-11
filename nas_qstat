@@ -1,12 +1,8 @@
 #!/PBS/bin/pbs_python
-# $Header:$
 #Author:dtalcott
 #Purpose:Python equivalent of qstat, but with options for how
 #Purpose:to display the output.
 #Purpose:Use --help for details.
-#Last-modified: $Author: dtalcott $ on $Date: 2020/06/13 12:09:40 $
-#Reviewed-by: 
-#Reviewed-on: 
 
 import sys
 import os
@@ -49,42 +45,49 @@ def main():
     prog = sys.argv[0].split('/')[-1]
     parser = argparse.ArgumentParser(description=long_desc, prog=prog,
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    thing_type = parser.add_mutually_exclusive_group()
     parser.add_argument('--version', action='version',
         version='%(prog)s $Id:$')
     parser.add_argument('-A', default=False, action='store_true',
         help='Select Altair default field list')
-    parser.add_argument('-B', default=False, action='store_true',
+    thing_type.add_argument('-B', default=False, action='store_true',
         help='Display information for servers')
-    parser.add_argument('-Q', default=False, action='store_true',
-        help='Display information for queues')
     parser.add_argument('-E', default=False, action='store_true',
         help='Sort jobs by server and job id')
-    parser.add_argument('-J', default=False, action='store_true',
-        help='Display status information for job arrays')
-    parser.add_argument('-t', default=False, action='store_true',
-        help='Display status information for jobs, job_arrays, and subjobs')
-    parser.add_argument('-p', default=False, action='store_true',
-        help='Replace Time Use column with percentage complete')
-    parser.add_argument('-x', default=False, action='store_true',
-        help='Include finished and moved jobs')
-    parser.add_argument('-a', default=False, action='store_true',
-        help='Display all jobs')
+    parser.add_argument('-G', default='b', action='store_const',
+        dest='size_units', const='G',
+        help='Display sizes in gigabytes')
     parser.add_argument('-H', default=False, action='store_true',
         help='Select only finished or moved jobs')
-    parser.add_argument('-i', default=False, action='store_true',
-        help='Select queued, held, or waiting jobs')
-    parser.add_argument('-n', default=False, action='store_true',
-        help='Include exec_host information')
-    parser.add_argument('-r', default=False, action='store_true',
-        help='Select running or suspended jobs')
-    parser.add_argument('-s', default=False, action='store_true',
-        help='Include job comment')
+    parser.add_argument('-J', default=False, action='store_true',
+        help='Display status information for job arrays')
+    parser.add_argument('-M', default='b', action='store_const',
+        dest='size_units', const='M',
+        help='Display sizes in 8 byte megawords')
+    thing_type.add_argument('-Q', default=False, action='store_true',
+        help='Display information for queues')
     parser.add_argument('-T', default=False, action='store_true',
         help='Replace Elap Time with estimated start time')
     parser.add_argument('-W', action='append', metavar='display option',
         help='options affecting field selection and disply. See qstat.1B')
+    parser.add_argument('-a', default=False, action='store_true',
+        help='Display all jobs, in alternate format')
+    parser.add_argument('-i', default=False, action='store_true',
+        help='Select queued, held, or waiting jobs')
+    parser.add_argument('-n', default=False, action='store_true',
+        help='Include exec_host information')
+    parser.add_argument('-p', default=False, action='store_true',
+        help='Replace Time Use column with percentage complete')
+    parser.add_argument('-r', default=False, action='store_true',
+        help='Select running or suspended jobs')
+    parser.add_argument('-s', default=False, action='store_true',
+        help='Include job comment')
+    parser.add_argument('-t', default=False, action='store_true',
+        help='Display status information for jobs, job_arrays, and subjobs')
     parser.add_argument('--verbose', '-v', default=0, action='count',
         help='increase debugging verbosity')
+    parser.add_argument('-x', default=False, action='store_true',
+        help='Include finished and moved jobs')
     parser.add_argument('things', nargs=argparse.REMAINDER,
         help='Jobs, queues, or servers to status')
 
@@ -95,10 +98,11 @@ def main():
         print("Cannot get PBS configuration information", file=sys.stderr)
         return 1
 
-    default_fields = ['jobid', 'user', 'queue', 'jobname', 'tsk', 'nds', 'reqdwallt']
-    default_fields = ['jobid', 'jobname']
+    # Look at -B, -Q, -A and -a options to decide on default list of fields
     if args.Q:
         default_fields = ['q_name', 'q_ncpus', 'q_ncpus_def', 'q_time', 'q_time_def', 'q_jm', 'state_count', 'q_pr', 'q_info']
+        if args.A:
+            pass # TODO Add support for split-out state counts
         kf = gen_field_list_Q()
     elif args.B:
         default_fields = ['server_name', 'jm', 'state_count', 'default_queue', 'info']
@@ -108,12 +112,16 @@ def main():
     else:
         default_fields = ['jobid', 'user', 'queue', 'jobname', 'tsk', 'nds',
             'reqdwallt']
+        if args.A:
+            default_fields = ['jobid', 'jobname', 'user', 'timeused', 'state', 'queue']
         kf = gen_field_list()
 
     # Build list of known fields
     opts_W = args.W
     if opts_W is None:
         opts_W = list()
+    # Make units for sizes available in opt_W
+    opts_W.append(args.size_units)
     # Load possible user or system overrides
     more_code = load_sysexits('qstat')
     if more_code:
@@ -362,18 +370,18 @@ def gen_field_list():
     fl.append(gen_field('cput', 'Cput', rj, 'fmt_from_rsrc', 'resources_used', 'cput'))
     fl.append(gen_field('ctime', 'Ctime', None, 'fmt_date', 'ctime'))
     fl.append(gen_field('eff', 'Eff', rj, 'fmt_efficiency', 'resources_used'))
-    fl.append(gen_field('elapwallt', 'Elap wallt', rj, 'fmt_elapsed', 'qtime stime'))
-    fl.append(gen_field('eligtime', 'Elig time', rj, 'fmt_elig_time', 'eligible_time'))
+    fl.append(gen_field('elapwallt', ['Elap', 'wallt'], rj, 'fmt_elapsed', 'qtime stime'))
+    fl.append(gen_field('eligtime', ['Elig', 'time'], rj, 'fmt_elig_time', 'eligible_time'))
     fl.append(gen_field('endtime', 'Endtime', None, 'fmt_end_time', 'job_state stime estimated Resource_List resources_used'))
-    fl.append(gen_field('eststart', 'Est start', rj, 'fmt_future_date', 'estimated', 'start_time'))
-    fl.append(gen_field('exitstatus', 'Exit status', rj, 'fmt_by_attr', 'Exit_status'))
+    fl.append(gen_field('eststart', ['Est', 'start'], rj, 'fmt_future_date', 'estimated', 'start_time'))
+    fl.append(gen_field('exitstatus', ['Exit', 'status'], rj, 'fmt_by_attr', 'Exit_status'))
     fl.append(gen_field('group', 'Group', None, 'fmt_by_attr', 'egroup'))
     fl.append(gen_field('jobid', 'JobID', None, 'fmt_jobid', None))
     fl.append(gen_field('jobname', 'Jobname', None, 'fmt_by_attr', 'Job_Name'))
     fl.append(gen_field('lifetime', 'Life time', rj, 'fmt_lifetime', 'qtime etime'))
-    fl.append(gen_field('maxwallt', 'Max wallt', rj, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('memory', 'Memory', hlrj, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('minwallt', 'Min wallt', rj, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('maxwallt', ['Max', 'wallt'], rj, 'fmt_from_rsrc_tm', 'Resource_List', 'max_walltime'))
+    fl.append(gen_field('memory', 'Memory', hlrj, 'fmt_from_rsrc_sz', 'resources_used Resource_List', 'mem'))
+    fl.append(gen_field('minwallt', ['Min', 'wallt'], rj, 'fmt_from_rsrc_tm', 'Resource_List', 'min_walltime'))
     fl.append(gen_field('mission', 'Mission', None, 'fmt_by_attr', 'farfle'))
     fl.append(gen_field('model', 'Model', None, 'fmt_by_attr', 'farfle'))
     fl.append(gen_field('nds', 'Nds', rj, 'fmt_by_attr', 'farfle'))
@@ -385,8 +393,8 @@ def gen_field_list():
     fl.append(gen_field('rank0', 'Rank0', None, 'fmt_by_attr', 'farfle'))
     fl.append(gen_field('reqid', 'ReqID', None, 'fmt_by_attr', 'farfle'))
     fl.append(gen_field('reqmem', 'Reqmem', hlrj, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('remwallt', 'Rem wallt', rj, 'fmt_by_attr', 'farfle'))
-    fl.append(gen_field('reqdwallt', 'Req\'d wallt', rj, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('remwallt', ['Rem', 'wallt'], rj, 'fmt_by_attr', 'farfle'))
+    fl.append(gen_field('reqdwallt', ['Req\'d', 'wallt'], rj, 'fmt_by_attr', 'farfle'))
     fl.append(gen_field('runs', 'Runs', rj, 'fmt_by_attr', 'farfle'))
     fl.append(gen_field('s', 'S', None, 'fmt_by_attr', 'farfle'))
     fl.append(gen_field('sessid', 'SessID', rj, 'fmt_by_attr', 'farfle'))

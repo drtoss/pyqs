@@ -170,10 +170,15 @@ def gen_field(name, title, form, func, source, opt=None):
 # Module global values
 
 def set_field_vars(opts):
-    global gnow, gHopt, gropt
+    global gnow, gropt, gszunits, ghuman
 
+    # gszunits = units for display of sizes
+    gszunits = 'G' if 'G' in opts else 'M' if 'M' in opts else 'b'
+    # ghuman = True to use human readable
+    ghuman = '-H' in opts  or gszunits != 'b'
+    # gnow = current epoch time
     gnow = int(time.time())
-    gHopt = '-H' in opts
+    # gropt = True if -W -r for raw values
     gropt = '-r' in opts
 
 # Functions to compute specific values for display
@@ -230,8 +235,7 @@ def fmt_elapsed(fi, info, opts):
 
 def fmt_elig_time(fi, info, opts):
     rawv = info.get('eligible_time', '--')
-    showdays = not gHopt
-    return secstoclock(clocktosecs(rawv), False, showdays)
+    return secstoclock(clocktosecs(rawv), False, ghuman)
 
 def fmt_end_time(fi, info, opts):
     guess = ''
@@ -266,7 +270,21 @@ def fmt_from_rsrc_tm(fi, info, opts):
     rawv = info.get(src + '.' + key, '--')
     if rawv == '--':
         return rawv
-    t = secstoclock(clocktosecs(rawv))
+    t = secstoclock(clocktosecs(rawv), False, ghuman)
+    return t
+
+def fmt_from_rsrc_sz(fi, info, opts):
+    # Pick one size item out of a resource list
+    key = fi['opt']
+    for src in fi['sources']:
+        rawv = info.get(src + '.' + key, '--')
+        if rawv != '--':
+            break
+    else:
+        rawv = '--'
+    if rawv == '--':
+        return rawv
+    t = ensuffix(unsuffix(rawv))
     return t
 
 def fmt_future_date(fi, info, opts):
@@ -301,6 +319,15 @@ def fmt_jobid(fi, info, opts):
     if len(t) <= 1:
         return rawv
     return t[0] + '.' + t[1]
+
+def fmt_lifetime(fi, info, opts):
+    qtime = info.get('qtime', None)
+    if qtime:
+        lifetime = gnow - int(qtime)
+        t = secstoclock(lifetime, False, ghuman)
+    else:
+        t = '--'
+    return t
 
 def fmt_model(fi, info, opts):
     # Raw format: 4:ncpus=3:model=sky_gpu:bigmem=false
@@ -409,6 +436,42 @@ def decode_resv_state_full(rawv):
             "RESV_DELETING_JOBS", "RESV_DEGRADED", "RESV_BEING_ALTERED",
             "RESV_IN_CONFLICT")[int(rawv)]
 
+def ensuffix(v):
+    '''Scale a memory value
+
+    Convert a raw byte count to the form 1234xB where x denotes
+    kilo-, mega-, ...
+    The global settings for -M and -G force particular scaling
+
+    Args:
+        v = value to convert
+    Returns
+        String equivalent, rounded to 3-4 places with a suffix.
+    '''
+    if v == '--' or v == '':
+        return v
+    if v < 0:
+        sign = -1
+        v = 0.0 - v
+    else:
+        sign = 1
+    if gszunits == 'M':
+        factor = 8.0 * 1024 * 1024
+        scale = 'MW'
+    elif gszunits == 'G':
+        factor = 1024.0 * 1024 * 1024
+        scale = 'GB'
+    else:
+        factor = 1.0
+        scale = ''
+        for t in ['KB', 'MB', 'GB', 'TB', 'PB']:
+            if v < 20000 * factor:
+                break
+            factor *= 1024.
+            scale = t
+    t = sign * round( v / factor, 0 )
+    return "%d%s" % (int(t), scale)
+
 def secstoclock(v, sf=False, df=False):
     '''Convert time in seconds for display
 
@@ -441,5 +504,40 @@ def secstoclock(v, sf=False, df=False):
     hh = dhm // 60
     mm = dhm % 60
     return r'%s%s%02d:%02d%s' % (sign, daypfx, hh, mm, secsuf)
+
+sizere = re.compile(r'(-?)([\d.]+)([kmgtp]?)([bw]?)$')
+def unsuffix(v):
+    '''Convert a memory size value based on suffix
+
+    That is, given a string like 1.23gb, return the result
+    in bytes as a float
+
+    Args:
+        v = size string to convert
+    Returns:
+        size in bytes
+    '''
+    mo = sizere.match(v.lower())
+    if not mo:
+        return v
+    neg = mo.group(1)
+    try:
+        value = float(mo.group(2))
+    except:
+        return v
+    scale = mo.group(3)
+    words = mo.group(4)
+    factor = {'k': 1024.,
+            'm': 1024. * 1024,
+            'g': 1024. * 1024 * 1024,
+            't': 1024. * 1024 * 1024 * 1024,
+            'p': 1024. * 1024 * 1024 * 1024 * 1024,
+            '': 1.0}.get(scale, 1.0)
+    if words == 'w':
+        factor *= 8.0
+    value *= factor
+    if neg == '-':
+        value = 0.0 - value
+    return value
 
 # vi:ts=4:sw=4:expandtab

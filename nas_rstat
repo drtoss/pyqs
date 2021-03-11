@@ -102,6 +102,7 @@ def main():
         print(rc, file=sys.stderr)
         return 1
     fmtr.field_list = field_list
+    nas_field_format.set_field_vars(opts_W)
     if args.F:
         attr_list = None
     # Collect the info
