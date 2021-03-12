@@ -215,12 +215,18 @@ def fmt_aoe(fi, info, opts):
 
 def fmt_date(fi, info, opts):
     rawv = fmt_by_attr(fi, info, opts)
-    # If -W -r, return raw value
     if gropt or rawv == '--':
         return rawv
     result = time.strftime(r'%y-%m-%d/%H:%M', time.localtime(int(rawv)))
     return result
 
+def fmt_date_full(fi, info, opts):
+    rawv = fmt_by_attr(fi, info, opts)
+    if gropt or rawv == '--':
+        return rawv
+    result = time.strftime(r'%c', time.localtime(int(rawv)))
+    return result
+    
 def fmt_duration(fi, info, opts):
     rawv = fmt_by_attr(fi, info, opts)
     if gropt or rawv == '--':
@@ -251,6 +257,8 @@ def fmt_end_time(fi, info, opts):
     if jobstate == "F":
         walltime = info.get('resources_used.walltime', None)
     if walltime == None:
+        walltime = info.get('Resource_List.walltime', None)
+    if walltime == None:
         return '--'
     wtime = clocktosecs(walltime)
     t = time.strftime(r'%y-%m-%d/%H:%M',time.localtime(start + wtime))
@@ -258,16 +266,24 @@ def fmt_end_time(fi, info, opts):
 
 def fmt_from_rsrc(fi, info, opts):
     # Pick one item out of a resource list
-    src = fi['sources'][0]
     key = fi['opt']
-    rawv = info.get(src + '.' + key, '--')
+    for src in fi['sources']:
+        rawv = info.get(src + '.' + key, '--')
+        if rawv != '--':
+            break
+    else:
+        rawv = '--'
     return rawv
 
 def fmt_from_rsrc_tm(fi, info, opts):
     # Pick one duration item out of a resource list
-    src = fi['sources'][0]
     key = fi['opt']
-    rawv = info.get(src + '.' + key, '--')
+    for src in fi['sources']:
+        rawv = info.get(src + '.' + key, '--')
+        if rawv != '--':
+            break
+    else:
+        rawv = '--'
     if rawv == '--':
         return rawv
     t = secstoclock(clocktosecs(rawv), False, ghuman)
@@ -320,6 +336,18 @@ def fmt_jobid(fi, info, opts):
         return rawv
     return t[0] + '.' + t[1]
 
+def fmt_jobstate(fi, info, opts):
+    jobstate = info.get('job_state', None)
+    holds = info.get('Hold_Types', '')
+    if holds == 'n':
+        holds = ''
+    elif holds == 's':
+        deps = info.get('depend', '')
+        if deps:
+            holds = 'd'
+    itv = 'I' if info.get('interactive', None) == 'True' else ''
+    return jobstate + itv + holds
+
 def fmt_lifetime(fi, info, opts):
     qtime = info.get('qtime', None)
     if qtime:
@@ -329,14 +357,22 @@ def fmt_lifetime(fi, info, opts):
         t = '--'
     return t
 
+modelre = re.compile(r'^(\d+)?.*\bmodel=(\w+)')
 def fmt_model(fi, info, opts):
     # Raw format: 4:ncpus=3:model=sky_gpu:bigmem=false
     rawv = fmt_by_attr(fi, info, opts)
     if gropt or rawv== '--':
         return rawv
-    mo = re.search(r'\bmodel=(\w+)', rawv)
-    if (mo):
-        return mo.group(1)
+    models=[]
+    for chunk in rawv.split('+'):
+        mo = modelre.search(chunk)
+        if (mo):
+            count = mo.group(1)
+            if count == None:
+                continue
+            models.append(count + ':' + mo.group(2))
+    if models:
+        return '+'.join(models)
     return '--'
 
 def fmt_name(fi, info, opts):
@@ -366,6 +402,31 @@ def fmt_queue_info(fi, info, opts):
         stuff.append('stopped')
     return " ".join(stuff)
 
+def fmt_remaining(fi, info, opts):
+    req = info.get('Resource_List.walltime', None)
+    if req == None:
+        return '--'
+    if info.get('r', None):
+        elap = info.get('resources_used.walltime', '0')
+        rem = clocktosecs(req) - clocktosecs(elap)
+    else:
+        jstate = info.get('job_state', ' ')
+        if jstate in ['F', 'X']:
+            rem = '--'
+        else:
+            rem = clocktosecs(req)
+    return secstoclock(rem, False, ghuman)
+
+def fmt_resv_state(fi, info, opts):
+    rawv = fmt_by_attr(fi, info, opts)
+    if gropt or rawv == '--':
+        return rawv
+    return decode_resv_state(rawv)
+
+def fmt_seqno(fi, info, opts):
+    rawv = info.get('id', '--')
+    return rawv.split('.')[0]
+
 def fmt_server_info(fi, info, opts):
     # Select interesting info about server status
     stuff = []
@@ -379,12 +440,6 @@ def fmt_server_info(fi, info, opts):
     if t and not t == '':
         stuff.append(t)
     return " ".join(stuff)
-
-def fmt_resv_state(fi, info, opts):
-    rawv = fmt_by_attr(fi, info, opts)
-    if gropt or rawv == '--':
-        return rawv
-    return decode_resv_state(rawv)
 
 def fmt_state_count(fi, info, opts):
     # State counts already formatted into pretty_sc attribute
@@ -470,7 +525,10 @@ def ensuffix(v):
             factor *= 1024.
             scale = t
     t = sign * round( v / factor, 0 )
-    return "%d%s" % (int(t), scale)
+    t = int(t)
+    if t == 0:
+        return "0"
+    return "%d%s" % (t, scale)
 
 def secstoclock(v, sf=False, df=False):
     '''Convert time in seconds for display
