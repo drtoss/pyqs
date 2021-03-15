@@ -243,7 +243,7 @@ def fmt_elig_time(fi, info, opts):
     rawv = info.get('eligible_time', '--')
     return secstoclock(clocktosecs(rawv), False, ghuman)
 
-def fmt_end_time(fi, info, opts):
+def fmt_est_end(fi, info, opts):
     guess = ''
     start = info.get('stime', None)
     if start == None:
@@ -351,7 +351,14 @@ def fmt_jobstate(fi, info, opts):
 def fmt_lifetime(fi, info, opts):
     qtime = info.get('qtime', None)
     if qtime:
-        lifetime = gnow - int(qtime)
+        jobstate = info.get('job_state', None)
+        if jobstate in ['F', 'X']:
+            # Until there is an end time attribute, assume
+            # the mod time corresponds to the end time.
+            mtime = info.get('mtime', gnow)
+            lifetime = int(mtime) - int(qtime)
+        else:
+            lifetime = gnow - int(qtime)
         t = secstoclock(lifetime, False, ghuman)
     else:
         t = '--'
