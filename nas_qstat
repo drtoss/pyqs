@@ -48,8 +48,6 @@ def main():
     thing_type = parser.add_mutually_exclusive_group()
     parser.add_argument('--version', action='version',
         version='%(prog)s $Id:$')
-    parser.add_argument('-A', default=False, action='store_true',
-        help='Select Altair default field list')
     thing_type.add_argument('-B', default=False, action='store_true',
         help='Display information for servers')
     parser.add_argument('-E', default=False, action='store_true',
@@ -98,22 +96,16 @@ def main():
         print("Cannot get PBS configuration information", file=sys.stderr)
         return 1
 
-    # Look at -B, -Q, -A and -a options to decide on default list of fields
+    # Look at -B, -Q, and -a options to decide on default list of fields
     if args.Q:
         default_fields = ['q_name', 'q_ncpus', 'q_ncpus_def', 'q_time', 'q_time_def', 'q_jm', 'state_count', 'q_pr', 'q_info']
-        if args.A:
-            pass # TODO Add support for split-out state counts
         kf = gen_field_list_Q()
     elif args.B:
         default_fields = ['server_name', 'jm', 'state_count', 'default_queue', 'info']
-        if args.A:
-            default_fields = ['server', 'max', 'tot', 'que', 'run', 'hld', 'wat', 'trn', 'ext', 'status']
         kf = gen_field_list_B()
     else:
         default_fields = ['jobid', 'user', 'queue', 'jobname', 'tsk', 'nds',
             'reqdwallt', 's', 'elapwallt', 'eff']
-        if args.A:
-            default_fields = ['jobid', 'jobname', 'user', 'timeused', 'state', 'queue']
         kf = gen_field_list()
 
     # Build list of known fields
