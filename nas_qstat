@@ -82,6 +82,8 @@ def main():
         help='Include job comment')
     parser.add_argument('-t', default=False, action='store_true',
         help='Display status information for jobs, job_arrays, and subjobs')
+    parser.add_argument('-u',
+        help='Display only jobs from this user')
     parser.add_argument('--verbose', '-v', default=0, action='count',
         help='increase debugging verbosity')
     parser.add_argument('-x', default=False, action='store_true',
@@ -160,27 +162,201 @@ def display_jobs(args, fmtr):
     '''
     global opts_W
 
-    c = layout.Config()
+    # Examine options to set selection and extend attributes
+    selects = dict()
+    extend = set()
+    if args.i:
+        selects['job_state'] = 'HQTW'
+    if args.r:
+        selects['job_state'] = 'BERSU'
+    if args.t:
+        extend.add('t')
+    if args.x:
+        extend.add('x')
+    if args.u:
+        selects['euser'] = args.u
+    if args.J:
+        selects['array'] = 'True'
+    extend = ''.join(extend)
+
+    # Build base layout
+    cfg = layout.Config()
     for fld in fmtr.field_list:
         title = fld['title']
         if not title:
             title = fld['name']
-        c.add_field(title, **fld['format'])
+        cfg.add_field(title, **fld['format'])
+
+    # Gather data from server
+    server_conn = {'': None, None: None}
     rows = []
-    conn = ifl.pbs_connect('')
-    bs = ifl.pbs_statjob(conn, '', None, 'x')
-    ifl.pbs_disconnect(conn)
-    for resv in bs:
+    bu = BatchUtils()
+    sel_attr = bu.dict_to_attropl(selects, ifl.EQ)
+    things = args.things
+    errcnt = 0
+    if len(things) == 0:
+        # No destinations, ask for jobs at default server
+        current_server = pbs_conf.pbs_server_name
+        conn = ifl.pbs_connect(current_server)
+        if conn < 0:
+            print("Cannot connect to PBS server: %d" % ifl.pbs_Errno(),
+                file = sys.stderr)
+            return 1
+        add_server_conn(server_conn, current_server, conn)
+        if sel_attr:
+            info = ifl.pbs_selstat(conn, sel_attr, fmtr.atl, extend)
+        else:
+            info = ifl.pbs_statjob(conn, None, fmtr.atl, extend)
+        err = ifl.pbs_Errno()
+        if (err):
+            errmsg = ifl.pbs_geterrmsg(conn)
+            if errmsg == None or errmsg == '':
+                errmsg = "error %d" % err
+            print("Cannot get job status: %s" % errmsg, file = sys.stderr)
+            errcnt += 1
+    else:
+        # There can be three types of objects to get job info for:
+        # individual jobs, queues, and servers. Distinguish them
+        info = []
+        idx = 0
+        while idx < len(things):
+            thing = things[idx].strip()
+            idx += 1
+            seq_num = None
+            is_jobs = False
+            if thing[0] not in '123456789':
+                # Server or queue
+                if thing[0] is '@':
+                    queue = None
+                    names = [thing]
+                    current_server = thing[1:]
+                else:
+                    t = thing.split('@')
+                    queue = t[0]
+                    names = [queue]
+                    current_server = t[1] if len(t) > 1 else None
+            else:
+                is_jobs = True
+                # Job id
+                try:
+                    (seq_num, parent_server, current_server, array_idx, _) = \
+                        parse_jobid(thing)
+                except:
+                    print("Unrecognized destination: %s" % thing,
+                        file = sys.stderr)
+                    errcnt += 1
+                    continue
+                # Collect sequence of jobids at same server into one list.
+                names = []
+                jobid = seq_num
+                if not parent_server:
+                    if current_server:
+                        parent_server = current_server
+                    else:
+                        parent_server = pbs_conf.pbs_server_name
+                if array_idx:
+                    jobid += array_idx
+                jobid += '.' + parent_server
+                add_server_conn(server_conn, parent_server, None)
+                if current_server and current_server not in server_conn:
+                    conn = ifl.pbs_connect(current_server)
+                    add_server_conn(server_conn, current_server, conn)
+                names.append(jobid)
+                prev_conn = server_conn[current_server]
+                # Examine next entry to see if more jobids
+                while idx < len(things):
+                    peek = things[idx]
+                    if peek[0] not in '123456789':
+                        break
+                    try:
+                        (s, p, c, a, _) = parse_jobid(peek)
+                    except:
+                        c = None
+                    # Detect change of server
+                    if server_conn.get(c, -2) != prev_conn:
+                        break
+                    jobid = s
+                    if a:
+                        jobid += a
+                    if not p:
+                        if c:
+                            p = current_server
+                        else:
+                            p = pbs_conf.pbs_server_name
+                    jobid += '.' + p
+                    names.append(jobid)
+                    idx += 1
+            # Now, issue query to current_server
+            if current_server == None:
+                current_server = pbs_conf.pbs_server_name
+            conn = server_conn.get(current_server, None)
+            if conn == None:
+                conn = ifl.pbs_connect(current_server)
+                add_server_conn(server_conn, current_server, conn)
+                if conn < 0:
+                    print("Cannot connect to PBS server %s: %d" % \
+                        (current_server, ifl.pbs_geterrmsg(ifl.pbs_Errno())),
+                        file = sys.stderr)
+                    errcnt += 1
+                    continue
+            if conn == -1:
+                # Known bad server name, skip
+                continue
+            if sel_attr:
+                bs = ifl.pbs_selstat(conn, sel_attr, fmtr.atl, extend)
+            else:
+                namelist = ','.join(names)
+                bs = ifl.pbs_statjob(conn, namelist, fmtr.atl, extend)
+            err = ifl.pbs_Errno()
+            if err:
+                errcnt += 1
+                errmsg = ifl.pbs_geterrmsg(conn)
+                if errmsg == None or errmsg == '':
+                    errmsg = "error %d" % err
+                errmsg += ': ' + namelist
+                print(errmsg,
+                    file = sys.stderr)
+                continue
+            if sel_attr and names and is_jobs:
+                # You cannot specify a list of names to the pbs_selstat()
+                # call, so we have to filter the results ourselves when
+                # explicit request ID were given.
+                newbs = []
+                name_set = set(names)
+                found = set()
+                for job in bs:
+                    jobid = job['id']
+                    if jobid in name_set:
+                        found.add(jobid)
+                        newbs.append(job)
+                bs = newbs
+                missing = name_set.difference(found)
+                if missing:
+                    print("Excluded Job Id%s:" % ('' if len(missing) == 1 else 's'),\
+                        ' '.join(missing), \
+                        file = sys.stderr)
+            if bs:
+                info.extend(bs)
+            names = []
+            # End of idx loop
+        # End of null things test
+    # Close server connections
+    for conn in set(server_conn.values()):
+        if conn != None and conn != -1:
+            ifl.pbs_disconnect(conn)
+    # Display info
+    for job in info:
         row = list()
         for f in fmtr.field_list:
             func = getattr(nas_field_format, f['func'])
-            row.append(func(f, resv, opts_W))
+            row.append(func(f, job, opts_W))
         rows.append(row)
     if rows:
         show_hdr = '-h' not in opts_W
-        res = layout.layout(c, rows, show_hdr=show_hdr)
-        print('\n'.join([x.rstrip() for x in res]))
-    return 0
+        lines = layout.layout(cfg, rows, show_hdr=show_hdr)
+        for line in lines:
+            print(line.rstrip())
+    return 1 if errcnt else 0
 
 def display_queues(args, fmtr):
     '''Output info about queues
@@ -433,59 +609,38 @@ def gen_field_list_Q():
     fl.append(gen_field('q_info', 'Info', de, 'fmt_queue_info', 'enabled started'))
     return fl
 
-def get_resv_info(resvids, attr_list):
-    '''Ask server for info about reservations
+def add_server_conn(smap, svr, conn):
+    '''Add mappings from server to PBS connection
+
+    Given a server name, look up its fqdn, IP addresses, aliase and
+    add them to a mapping from server to connection.
 
     Args:
-        resvids = list of reservation IDs
-        attr_list = list of interesting attributes.
+        smap = Dictionary mapping names to connections to be updated.
+        svr = Server to add
+        conn = Connection to associate with server
     Returns:
-        List of PBS batchstatus results
+        None if name lookup failed, else True
+    Exit:
+        smap updated
     '''
-    bu = BatchUtils()
-    if attr_list != None:
-        attr_list = (','.join(attr_list)).split(',')
-        atl = bu.list_to_attrl(list(attr_list))
-    else:
-        atl = None
-    bs = list()
-    if resvids == None or len(resvids) == 0:
-        # Ask for all reservations
-        conn = ifl.pbs_connect(None)
-        if conn < 0:
-            print("Cannot connect to PBS server: %s" % ifl.pbs_Errno(),
-                file = sys.stderr)
-            return None
-        bs = ifl.pbs_statjob(conn, None, atl, None)
-    else:
-        cur_server = None
-        conn = None
-        for resid in resvids:
-            (seq_no, server) = get_server(resid)
-            if seq_no == None and server == None:
-                print("Invalid request id:", resid, file=sys.stderr)
-                continue
-            if server == None:
-                server = pbs_conf.pbs_server_name
-            if server != cur_server:
-                if conn != None:
-                    ifl.pbs_disconnect(conn)
-                    cur_server = None
-                conn = ifl.pbs_connect(server)
-                if conn < 0:
-                    print("Cannot connect to PBS server %s: %s" % \
-                        (server, ifl.pbs_Errno()))
-                    break
-                cur_server = server
-            bs1 = ifl.pbs_statjob(conn, seq_no, atl, None)
-            if verbose > 1:
-                print(bs1)
-            bs.extend(bs1)
-    if conn != None and conn >= 0:
-        ifl.pbs_disconnect(conn)
-    if verbose > 1:
-        print (bs)
-    return bs
+    if svr in smap:
+        # Don't replace existing entries with None
+        if conn == None:
+            return True
+    try:
+        (hname, aliases, ipaddrs) = socket.gethostbyname_ex(svr)
+    except:
+        if svr not in smap:
+            smap[svr] = None
+        return None
+    smap[svr] = conn
+    smap[hname] = conn
+    for x in aliases:
+        smap[x] = conn
+    for x in ipaddrs:
+        smap[x] = conn
+    return True
 
 def pretty_state_counts(ilist):
     '''Convert state info into "pretty" output
