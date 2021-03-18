@@ -175,11 +175,11 @@ def set_field_vars(opts):
     # gszunits = units for display of sizes
     gszunits = 'G' if 'G' in opts else 'M' if 'M' in opts else 'b'
     # ghuman = True to use human readable
-    ghuman = '-H' in opts  or gszunits != 'b'
+    ghuman = '-H' in opts or 'human' in opts or gszunits != 'b'
     # gnow = current epoch time
     gnow = int(time.time())
-    # gropt = True if -W -r for raw values
-    gropt = '-r' in opts
+    # gropt = True if -W raw for raw values
+    gropt = '-r' in opts or 'raw' in opts
 
 # Functions to compute specific values for display
 # fmt_xxx(fi, info, opts)
@@ -234,10 +234,36 @@ def fmt_duration(fi, info, opts):
     return secstoclock(int(rawv))
 
 def fmt_efficiency(fi, info, opts):
-    return "TODO"
+    ncpus = info.get('resources_used.ncpus')
+    cpu_pct = info.get('resources_used.cpupercent')
+    if not ncpus or not cpu_pct or ncpus == "0":
+        return '--'
+    eff = float(cpu_pct) / float(ncpus)
+    # There is a bug where the cpupercent goes up, but never goes
+    # back down. So, if we have cputime and walltime, compute a
+    # better value.
+    cput = info.get('resources_used.cput')
+    walltime = info.get('resources_used.walltime')
+    if cput and walltime:
+        cputs = clocktosecs(cput)
+        walls = clocktosecs(walltime)
+        cpus = float(ncpus)
+        if cpus > 0 and walls > 0:
+            effc = 100.0 * cputs / (cpus * walls)
+            if effc < eff:
+                eff = effc
+    return "%.0f%%" % eff
 
 def fmt_elapsed(fi, info, opts):
-    return "TODO"
+    state = info.get('job_state', '?')
+    if state in 'RSBEFX':
+        rawv = info.get('resources_used.walltime', '--')
+        if gropt or rawv == '--':
+            return rawv
+        return secstoclock(clocktosecs(rawv), False, ghuman)
+    etime = info.get('etime', gnow)
+    t = gnow - int(etime)
+    return secstoclock(t, False, ghuman)
 
 def fmt_elig_time(fi, info, opts):
     rawv = info.get('eligible_time', '--')

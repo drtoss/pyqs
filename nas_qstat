@@ -352,7 +352,7 @@ def display_jobs(args, fmtr):
             row.append(func(f, job, opts_W))
         rows.append(row)
     if rows:
-        show_hdr = '-h' not in opts_W
+        show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
         lines = layout.layout(cfg, rows, show_hdr=show_hdr)
         for line in lines:
             print(line.rstrip())
@@ -435,7 +435,7 @@ def display_queues(args, fmtr):
             row.append(func(f, svr, opts_W))
         rows.append(row)
     if rows:
-        show_hdr = '-h' not in opts_W
+        show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
         res = layout.layout(cfg, rows, show_hdr=show_hdr)
         print('\n'.join([x.rstrip() for x in res]))
     return 0
@@ -513,7 +513,7 @@ def display_servers(args, fmtr):
             row.append(func(f, svr, opts_W))
         rows.append(row)
     if rows:
-        show_hdr = '-h' not in opts_W
+        show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
         res = layout.layout(cfg, rows, show_hdr=show_hdr)
         print('\n'.join([x.rstrip() for x in res]))
     return 0
@@ -538,7 +538,7 @@ def gen_field_list():
     fl.append(gen_field('cput', 'Cput', rj, 'fmt_from_rsrc', 'resources_used', 'cput'))
     fl.append(gen_field('ctime', 'Ctime', None, 'fmt_date', 'ctime'))
     fl.append(gen_field('eff', 'Eff', rj, 'fmt_efficiency', 'resources_used'))
-    fl.append(gen_field('elapwallt', ['Elap', 'wallt'], rj, 'fmt_elapsed', 'qtime stime'))
+    fl.append(gen_field('elapwallt', ['Elap', 'wallt'], rj, 'fmt_elapsed', 'resources_used etime job_state'))
     fl.append(gen_field('eligtime', ['Elig', 'time'], rj, 'fmt_elig_time', 'etime'))
     fl.append(gen_field('eligwait', ['Elig', 'wait'], rj, 'fmt_duration', 'eligible_time'))
     fl.append(gen_field('estend', ['Est', 'end'], None, 'fmt_est_end', 'job_state stime estimated Resource_List resources_used'))
