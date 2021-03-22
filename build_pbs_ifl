@@ -1,0 +1,44 @@
+#!/bin/sh
+
+source /etc/pbs.conf
+
+# Extend PATH so swig is available
+PATH=~dtalcott/swig/bin:$PATH
+# Point repo at sources used to build current pbs_python
+repo=~dtalcott/work/drtoss
+
+# Extract pieces needed to define pbs_conf structure
+
+(
+	grep "^#define.*MAXAUTHNAME" ${repo}/src/include/libauth.h
+	sed -n -e '/struct pbs_config/,/extern struct pbs_config/p' \
+		$repo/src/include/pbs_internal.h | \
+	grep -v psi_t
+) > my_config.h
+
+(
+	echo 'from pbs_ifl import *'
+	echo
+	echo 'class BatchUtils(object):'
+	sed -n -e '/def list_to_attrl/,/def display_attrl/p' < \
+		$repo/test/fw/ptl/lib/ptl_batchutils.py | \
+		grep -v 'def display_attrl'
+) > nas_utils.py
+
+swig -python -I${repo}/src/include ./pbs_ifl.i
+
+t=$(pbs_python --version)
+case ${t#pbs_version = } in
+	(20.*)	sfx="3.*" ;;
+	(19.8)	sfx="2.*" ;;
+esac
+gcc -g -Wall -Wno-unused-variable -fPIC -shared \
+	-I ${repo}/src/include \
+	-I /usr/include/python${sfx} \
+	-L ${PBS_EXEC}/lib \
+	-lpbs \
+	-Wl,-rpath=${PBS_EXEC}/lib \
+	-o _pbs_ifl.so \
+	./pbs_ifl_wrap.c
+
+ldd _pbs_ifl.so
