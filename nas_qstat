@@ -64,8 +64,6 @@ def main():
         help='Display sizes in 8 byte megawords')
     thing_type.add_argument('-Q', default=False, action='store_true',
         help='Display information for queues')
-    parser.add_argument('-T', default=False, action='store_true',
-        help='Replace Elap Time with estimated start time')
     parser.add_argument('-W', action='append', metavar='display option',
         help='options affecting field selection and disply. See qstat.1B')
     parser.add_argument('-a', default=False, action='store_true',
@@ -74,8 +72,6 @@ def main():
         help='Select queued, held, or waiting jobs')
     parser.add_argument('-n', default=False, action='store_true',
         help='Include exec_host information')
-    parser.add_argument('-p', default=False, action='store_true',
-        help='Replace Time Use column with percentage complete')
     parser.add_argument('-r', default=False, action='store_true',
         help='Select running or suspended jobs')
     parser.add_argument('-s', default=False, action='store_true',
