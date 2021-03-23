@@ -424,6 +424,11 @@ def fmt_nodes(fi, info, opts):
             nodes.append(mo.group(1))
     return ",".join(nodes)
 
+def fmt_no_space(fi, info, opts):
+    # Reformat so value won't get split by awk, etc.
+    rawv = fmt_by_attr(fi, info, opts)
+    return re.sub(r'\s+', '_', rawv)
+
 def fmt_queue_info(fi, info, opts):
     # Select interesting info about queue status
     stuff = []
