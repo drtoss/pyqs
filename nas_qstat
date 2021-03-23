@@ -20,7 +20,7 @@ from nas_utils import BatchUtils
 from nas_pbsutil import *
 import nas_layout as layout
 import nas_field_format
-from nas_field_format import NAS_field_format,gen_field
+from nas_field_format import NAS_field_format,gen_field,clocktosecs
 
 long_desc = '''Display information about jobs, queues, or servers
 
@@ -50,8 +50,6 @@ def main():
         version='%(prog)s $Id:$')
     thing_type.add_argument('-B', default=False, action='store_true',
         help='Display information for servers')
-    parser.add_argument('-E', default=False, action='store_true',
-        help='Sort jobs by server and job id')
     parser.add_argument('-G', default='b', action='store_const',
         dest='size_units', const='G',
         help='Display sizes in gigabytes')
@@ -165,6 +163,9 @@ def display_jobs(args, fmtr):
         selects['job_state'] = 'HQTW'
     if args.r:
         selects['job_state'] = 'BERSU'
+    if args.H:
+        selects['job_state'] = 'FMX'
+        extend.add('x')
     if args.t:
         extend.add('t')
     if args.x:
@@ -340,8 +341,39 @@ def display_jobs(args, fmtr):
     for conn in set(server_conn.values()):
         if conn != None and conn != -1:
             ifl.pbs_disconnect(conn)
+    # Tag sort job list
+    def cmpf(i):
+        def safeint(x):
+            return int(x) if x.isnumeric() else (int(x) if (x.startswith('-') and x[1:].isnumeric()) else 0)
+        job = info[i]
+        st = job.get('job_state','?')
+        k1 = 'BRQHWTEX'.find(st)
+        if st in 'BR':
+            k2 = safeint(job.get('Priority',''))
+            k3 = job.get('queue','')
+            k4 = safeint(job.get('Resource_List.nodect',''))
+            k4 = safeint(job.get('Resource_List.ncpus',''))
+            k5 = clocktosecs(job.get('Resource_List.walltime',''))
+            return (k1, -k2, k3, -k4, -k5, -k6, i)
+        if st in 'Q':
+            k2 = safeint(job.get('spri',''))
+            k3 = safeint(job.get('Priority',''))
+            k4 = safeint(job.get('Resource_List.nodect',''))
+            k5 = clocktosecs(job.get('Resource_List.walltime',''))
+            (s, p, _, a, _) = parse_jobid(job.get('id','1.unknown'))
+            k6 = p
+            k7 = safeint(s)
+            k8 = safeint(a.strip('[]') if a else '')
+            return (k1, -k2, -k3, -k4, -k5, k6, k7, k8, i)
+        (s, p, _, a, _) = parse_jobid(job.get('id','1.unknown'))
+        k2 = p
+        k3 = safeint(s)
+        k4 = safeint(a.strip('[]') if a else '')
+        return (k1, k2, k3, k4, i)
+    tags = sorted(range(len(info)), key=cmpf)
     # Display info
-    for job in info:
+    for jobi in tags:
+        job = info[jobi]
         row = list()
         for f in fmtr.field_list:
             func = getattr(nas_field_format, f['func'])
