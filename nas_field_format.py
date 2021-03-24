@@ -18,42 +18,15 @@ class NAS_field_format(object):
 
     Take a list of field_info dictionaries and modify the layout parameters
     from the -W options. The options we are interested in look like:
-
-    settings ::= ['title:' title] option_list [junk]
-    title ::= word | quoted_string
-    option_list :== option+
-    option ::= '-' key value
-    key ::= word
-    value ::= word | quoted_string
-    quoted_string ::= sglQuotedString | dblQuotedString | QuotedString({ })
-    junk ::= remainder of line
-
-    We use the pyparsing module to deal with the ugly option syntax
+    fmt_xxx="key: value key:value"
 
     Args:
         fl = list of field_info data
     Returns: True if no errors, else error messages
     '''
-    # First build parser that recognizes -W fmt_xxx=-key value -key value
-    import pyparsing as pp
-    quoted_string = \
-            pp.QuotedString(quoteChar = '"', endQuoteChar = '"') | \
-            pp.QuotedString(quoteChar = "'", endQuoteChar = "'") | \
-            pp.QuotedString(quoteChar = '{', endQuoteChar = '}')
-    title = pp.Suppress('title:') + ( pp.Word(pp.alphanums) | quoted_string )
-    value = pp.Word(pp.alphanums) | quoted_string
-    key = pp.Word(pp.alphas)
-    option = ( pp.Suppress('-') + key + value ) | ( key + pp.Suppress(':') + value )
-    option_list = option[...]
-    junk = pp.SkipTo(pp.LineEnd())
-    settings = pp.Optional(title('title')) + option_list + \
-        pp.Optional(junk('junk'))
 
-    # Now apply it to appropriate -W options
     errlist = []
     for wopt in self.W:
-        if wopt.startswith('o='):
-            continue
         # Is it our kind of W option?
         mo = re.match(r'fmt_(\w+)=(.+)', wopt)
         if not mo:
@@ -66,22 +39,34 @@ class NAS_field_format(object):
                 break
         else:
             continue
-        opt_str = mo.group(2)
-        opts = settings.parseString(opt_str)
-        if opts.junk:
-            errlist.append("Garbage in format spec %s at %s" % (wopt, opts.junk))
+        opt_str = mo.group(2).strip()
+        opts = []
+        while opt_str != '':
+            mo = re.match(r'(\w+):\s*([^ ]+)(.*)', opt_str)
+            if not mo:
+                errlist.append("Garbage in format spec for %s: %s" % \
+                    (name, opt_str))
+                break
+            key = mo.group(1)
+            value = mo.group(2)
+            opt_str = mo.group(3)
+            opt_str = opt_str.strip() if opt_str else ''
+            opts.append((key, value))
+        # Ignore if parse problem
+        if opt_str != '':
             continue
-        # Discard empty junk
-        if opts[-1] == '':
-            opts.pop()
-        # Check for new field title
-        if opts.title:
-            fl[idx]['title'] = opts.pop(0).split()
-        # Merge in new format options
-        for i in range(0, len(opts), 2):
-            key = opts[i]
-            val = opts[i+1]
-            fl[idx]['format'][key] = val
+        # Update field list format with new values
+        for (key, value) in opts:
+            if key == 'title':
+                # Might need to convert title to multi-line list
+                title = re.sub(r'\\n','\n',value)
+                if title != value:
+                    title = title.split('\n')
+                fl[idx]['title'] = title
+            elif key in ['minw', 'maxw']:
+                fl[idx]['format'][key] = int(value)
+            else:
+                fl[idx]['format'][key] = value
     if errlist:
         return '\n'.join(errlist)
     return True
@@ -154,6 +139,9 @@ def gen_field(name, title, form, func, source, opt=None):
     '''
     if form is None:
         form = {}
+    else:
+        # Need unique format dict for each field
+        form = form.copy()
     if func is None:
         func = 'get_by_name'
     if source is None:
