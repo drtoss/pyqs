@@ -103,6 +103,13 @@ def main():
         default_fields = ['jobid', 'user', 'queue', 'jobname', 'tsk', 'nds',
             'reqdwallt', 's', 'elapwallt', 'eff']
         kf = gen_field_list()
+        if args.verbose > 2:
+            # Show titles of known fields
+            l = []
+            for x in kf:
+                t = x['title']
+                l.append(t if isinstance(t, str) else ' '.join(t))
+            print('Known field titles', ', '.join(l))
 
     # Build list of known fields
     opts_W = args.W
