@@ -1,2 +1,16 @@
 This project is still in pre-release development. Not ready even for alpha
 testing.
+
+Pieces:
+ build_pbs_ifl -- Shell script to build python interface to PBS IFL routines,
+  using swig. For now, the script needs to be modified to tell it where the
+  OpenPBS sources are and to add swig to the PATH.
+ nas_field_format.py -- Functions to compute string values for fields
+ nas_layout.py -- The layout engine that handles field justification, widths,
+  headers, etc.
+ nas_utils.py -- BatchUtils functions copied from PTL
+ nas_pbsutil.py -- Python versions of C routines used by C qstat
+ nas_qstat -- Main routine of python qstat
+ nas_rstat -- Python version of pbs_rstat
+ pbs_ifl.i -- Slightly modified version of OpenPBS's swig input file to build
+  pbs_ifl module
