@@ -32,7 +32,7 @@ case ${t#pbs_version = } in
 	(20.*)	sfx="3.*" ;;
 	(19.8)	sfx="2.*" ;;
 esac
-gcc -g -Wall -Wno-unused-variable -fPIC -shared \
+gcc -g -O2 -Wall -Wno-unused-variable -fPIC -shared \
 	-I ${repo}/src/include \
 	-I /usr/include/python${sfx} \
 	-L ${PBS_EXEC}/lib \
