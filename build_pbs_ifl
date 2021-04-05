@@ -30,7 +30,7 @@ swig -python -I${repo}/src/include ./pbs_ifl.i
 t=$(pbs_python --version)
 case ${t#pbs_version = } in
 	(20.*)	sfx="3.*" ;;
-	(19.8)	sfx="2.*" ;;
+	(19.*)	sfx="2.*" ;;
 esac
 gcc -g -O2 -Wall -Wno-unused-variable -fPIC -shared \
 	-I ${repo}/src/include \
