@@ -351,31 +351,39 @@ def display_jobs(args, fmtr):
     # Tag sort job list
     def cmpf(i):
         def safeint(x):
-            return int(x) if x.isnumeric() else (int(x) if (x.startswith('-') and x[1:].isnumeric()) else 0)
+            try:
+                t = int(x)
+            except:
+                t = 0
+            return t
         job = info[i]
         st = job.get('job_state','?')
         k1 = 'BRQHWTEX'.find(st)
         if st in 'BR':
-            k2 = safeint(job.get('Priority',''))
+            k2 = safeint(job.get('Priority','0'))
             k3 = job.get('queue','')
-            k4 = safeint(job.get('Resource_List.nodect',''))
-            k4 = safeint(job.get('Resource_List.ncpus',''))
+            k4 = safeint(job.get('Resource_List.nodect','0'))
+            k4 = safeint(job.get('Resource_List.ncpus','0'))
             k5 = clocktosecs(job.get('Resource_List.walltime',''))
-            return (k1, -k2, k3, -k4, -k5, -k6, i)
-        if st in 'Q':
-            k2 = safeint(job.get('spri',''))
-            k3 = safeint(job.get('Priority',''))
-            k4 = safeint(job.get('Resource_List.nodect',''))
+            if not isinstance(k5, int):
+                k5 = 0
+            return (k1, -k2, k3, -k4, -k5, i)
+        elif st in 'Q':
+            k2 = safeint(job.get('spri','0'))
+            k3 = safeint(job.get('Priority','0'))
+            k4 = safeint(job.get('Resource_List.nodect','0'))
             k5 = clocktosecs(job.get('Resource_List.walltime',''))
+            if not isinstance(k5, int):
+                k5 = 0
             (s, p, _, a, _) = parse_jobid(job.get('id','1.unknown'))
             k6 = p
             k7 = safeint(s)
-            k8 = safeint(a.strip('[]') if a else '')
+            k8 = safeint(a.strip('[]') if a else '0')
             return (k1, -k2, -k3, -k4, -k5, k6, k7, k8, i)
         (s, p, _, a, _) = parse_jobid(job.get('id','1.unknown'))
         k2 = p
         k3 = safeint(s)
-        k4 = safeint(a.strip('[]') if a else '')
+        k4 = safeint(a.strip('[]') if a else '0')
         return (k1, k2, k3, k4, i)
     tags = sorted(range(len(info)), key=cmpf)
     # Display info
