@@ -29,10 +29,12 @@ writing the status to standard output. It is similar to PBS's qstat, but
 provides more options for selecting and formatting the output.
 '''
 
+args = None
+gNow = time.time()
+gserver_info = dict()
+opts_W = list()
 pbs_conf = ifl.cvar.pbs_conf
 verbose = 0
-args = None
-opts_W = list()
 
 def main():
     global verbose, args, opts_W
@@ -157,7 +159,7 @@ def main():
     return rc
 
 def display_jobs(args, fmtr):
-    '''Output info in standard format
+    '''Output job info
 
     For each job, generate a list of display values for each
     selected field. Collect those lists into a list and pass it to
@@ -188,6 +190,8 @@ def display_jobs(args, fmtr):
     if args.J:
         selects['array'] = 'True'
     extend = ''.join(extend)
+
+    alt_disp = True if args.a else False
 
     # Build base layout
     cfg = layout.Config()
@@ -294,6 +298,10 @@ def display_jobs(args, fmtr):
         if conn == -1:
             # Known bad server name, skip
             continue
+        # Display server header, if requested
+        if alt_disp:
+            cache_server(current_server, conn)
+            display_server_hdr(current_server, args, opts_W)
         if sel_attr:
             bs = ifl.pbs_selstat(conn, sel_attr, fmtr.atl, extend)
         else:
@@ -549,6 +557,164 @@ def display_servers(args, fmtr):
         print('\n'.join([x.rstrip() for x in res]))
     return 0
 
+def cache_server(server, conn):
+    '''Cache info about a server
+
+    Args:
+        server = server name
+        conn = PBS connection to server
+    Exit:
+        Info about server saved in gserver_info hash
+    '''
+    global gserver_info
+    sname = server.split('.')[0]
+    if sname in gserver_info:
+        return gserver_info[sname]
+    bu = BatchUtils()
+    bs = ifl.pbs_statserver(conn, None, None)
+    info = bs[0]
+    gserver_info[sname] = info
+    if info == None:
+        return info
+    # If server is in promising state, collect more info
+    state = info.get('server_state','')
+    if not re.search(r'Scheduling|Active|Idle', state):
+        info['mom_info'] = list()
+        return info
+    atrs = ['comment', 'jobs', 'partition', 'queue', 'resv', 'state',
+        'resources_available', 'resources_assigned']
+    atrl = bu.list_to_attrl(atrs)
+    mom_info = ifl.pbs_statvnode(conn, None, atrl, None)
+    info['mom_info'] = mom_info
+    atrs = ['reserve_end', 'reserve_start']
+    atrl = bu.list_to_attrl(atrs)
+    resv_info = ifl.pbs_statresv(conn, None, atrl, None)
+    info['resv_info'] = resv_info
+    return info
+
+def display_server_hdr(server, args, opts_W):
+    '''Display info about server
+
+    Show summary information about a server (before the display
+    of jobs on that server).
+
+    Args:
+        server = server name
+        args = parsed command line arguments
+        opts_W = -W options
+    '''
+    def safeint(x):
+        try:
+            t = int(x)
+        except:
+            t = 0
+        return t
+    from nas_field_format import unsuffix
+    sname = server.split('.')[0]
+    info = gserver_info[sname]
+    print(server + ':', time.asctime(time.localtime()))
+    # Create one-line job header
+    total_jobs = safeint(info.get('total_jobs', '0'))
+    counts = info.get('state_count','')
+    comment = info.get('comment')
+    scheduling = info.get('scheduling')
+    clist = []
+    jcnt = 0
+    for x in counts.split():
+        y = x.split(':')
+        if len(y) != 2:
+            continue
+        clist.append(y[0][0]+':'+y[1])
+        jcnt += safeint(y[1])
+    done_count = total_jobs - jcnt
+    if done_count > 0 and args.x:
+        done_string = " + %d finished" % done_count
+    else:
+        done_string = ''
+    plural = 's' if jcnt != 1 else ''
+    print(" Server reports %d job%s total (%s)%s" % (jcnt, plural,
+            ' '.join(clist), done_string))
+    # Add any server comment and scheduler status
+    if comment:
+        print("\t", comment)
+    if scheduling != 'True':
+        print("\t+++ Scheduling turned off.")
+    all_resvs = info.get('resv_info',())
+    # Collect info about each MoM
+    mom_list = ()
+    for minfo in info.get('mom_info',()):
+        mom_name = minfo.get('id')
+        if not mom_name:
+            continue
+        cpus_tot = safeint(minfo.get('resources_available.ncpus'))
+        cpus_used = safeint(minfo.get('resources_assigned.ncpus'))
+        cpus_free = cpus_tot - cpus_used
+        mem_tot = unsuffix(minfo.get('resources_available.mem','0'))
+        mem_used = unsuffix(minfo.get('resources_assigned.mem','0'))
+        mem_free = mem_tot - mem_used
+        jobs = minfo.get('jobs','')
+        jset = set()
+        for x in jobs.split(','):
+            t = x.find('/')
+            x = x[:t] if t > -1 else x
+            jset.add(x)
+        job_cnt = len(jset)
+        comment = minfo.get('comment', '')
+        model = minfo.get('resources_available.model','')
+        partition = minfo.get('partition', '')
+        queue = minfo.get('queue', '')
+        resvs = minfo.get('resv', '').split(',')
+        state = minfo.get('state', '')
+        # Look for interesting info about MoM
+        interest = []
+        if queue != '':
+            interest.append('q=' + queue)
+        if partition != '':
+            interest.append('p=' + partition)
+        # Some NAS only tweaks
+        if 'model' in opts_W:
+            t = minfo.get('resources_available.bigmem')
+            if t == 'True':
+                interest[0:0] = ['bigmem']
+            t = minfo.get('resources_available.gpu')
+            if t:
+                interest[0:0] = [t]
+            if model != '':
+                interest[0:0] = [model]
+        # Simplify state string
+        t = "" if 'free' in state else "in-use"
+        state = state.replace(',', ' ')
+        new_states = []
+        is_down = False
+        is_offline = False
+        for ss in state.split(' '):
+            if ss in ['job-exclusive', 'job-busy']:
+                new_states.append(t)
+            elif ss == 'down':
+                is_down = True
+            elif ss == 'offline':
+                if_offline = True
+            elif ss in ['Stale', 'state-unknown', 'free', '<various>']:
+                pass
+            else:
+                new_states.append(ss)
+        if is_down:
+            new_states[0:0] = ['down']
+        if is_offline:
+            new_states[0:0] = ['offline']
+        state = ' '.join(new_states)
+        # Include state in interesting info
+        if state != '':
+            interest.append(state)
+        # Remove redundant down info from comment
+        if is_down:
+            comment = comment.replace('node down: communication closed','')
+            comment = comment.replace('  ', ' ')
+        # Check for reservations on node
+        if resvs and resvs[0] != '':
+            r = format_resvs(all_resvs, mom_name, resvs)
+            print(mom_name, r)
+
 def gen_field_list():
     '''Generate list of known fields
 
@@ -708,6 +874,93 @@ def pretty_state_counts(ilist):
         cfg.add_field(sn, hf='_', hj='r', hs=s, df='')
     scrows = layout.layout(cfg, sclist)
     return scrows
+
+def format_resvs(all_resvs, host, resv_list):
+    '''Get reservations affecting a host
+
+    From the list of all reservations and those that apply to a host,
+    create a string with interesting info about the reservations.
+    '''
+    global gNow
+    def safeint(x):
+        try:
+            t = int(x)
+        except:
+            t = 0
+        return t
+    end_of_interest = gNow + 9 * 24 * 3600
+    earliest = -1
+    missing = 0
+    rlist = []
+    for r in resv_list:
+        for resv_info in all_resvs:
+            if resv_info['id'] != r:
+                continue
+            start = safeint(resv_info['reserve_start'])
+            end = safeint(resv_info['reserve_end'])
+            if start < end_of_interest and end >= gNow:
+                resv_info['rstart'] = start
+                resv_info['rend'] = end
+                rlist.append(resv_info)
+            if earliest < 0 or start < earliest:
+                earliest = start
+            break
+        else:
+            missing += 1
+    if len(rlist) == 0:
+        if missing == 0:
+            return ''
+        elif missing == 1:
+            return 'reservation'
+        else:
+            return 'reservations'
+    # Decide what to do based on earliest matchin reservation
+    one_day_out = gNow + 24 * 3600
+    six_days_out = gNow + 6 * 24 * 3600
+    the_time = earliest
+    if earliest > one_day_out:
+        two_weeks_out = gNow + 14 * 24 * 3600
+        if earliest > two_weeks_out:
+            fmt = r'Resv on %b %d'
+        elif earliest > six_days_out:
+            fmt = r'Resv next %a'
+        else:
+            fmt = r'Resv on %a'
+        return time.strftime(fmt, time.localtime(earliest))
+    if earliest > gNow:
+        if earliest > gNow + 12 * 3600:
+            fmt = r'Resv %a %H:%M'
+        else:
+            fmt = r'Resv at %H:%M'
+    else:
+        # Active reservation. Find when reservations will end
+        start = gNow
+        end = gNow
+        found = True
+        while found:
+            found = False
+            fstart = start - 30 * 60
+            fend = end + 30 * 60
+            for ri in rlist:
+                rstart = ri['rstart']
+                rend = ri['rend']
+                if rstart > fend or rend < fstart:
+                    continue
+                if rstart < start:
+                    start = rstart
+                    found = True
+                if rend > end:
+                    end = rend
+                    found = True
+        if end > one_day_out:
+            if end > six_days_out:
+                fmt = r'Resv until %b %e'
+            else:
+                fmt = r'Resv until %a %H:%M'
+        else:
+            fmt = r'Resv until %H:%M'
+        the_time = end
+    return time.strftime(fmt, localtime(the_time))
 
 if __name__ == '__main__':
     sys.exit(main())
