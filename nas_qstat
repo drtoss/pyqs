@@ -609,10 +609,10 @@ def display_server_hdr(server, args, opts_W):
         except:
             t = 0
         return t
-    from nas_field_format import unsuffix
+    from nas_field_format import unsuffix, ensuffix
     sname = server.split('.')[0]
     info = gserver_info[sname]
-    print(server + ':', time.asctime(time.localtime()))
+    print(server + ':    ', time.asctime(time.localtime()))
     # Create one-line job header
     total_jobs = safeint(info.get('total_jobs', '0'))
     counts = info.get('state_count','')
@@ -641,7 +641,7 @@ def display_server_hdr(server, args, opts_W):
         print("\t+++ Scheduling turned off.")
     all_resvs = info.get('resv_info',())
     # Collect info about each MoM
-    mom_list = ()
+    mom_list = []
     for minfo in info.get('mom_info',()):
         mom_name = minfo.get('id')
         if not mom_name:
@@ -654,16 +654,20 @@ def display_server_hdr(server, args, opts_W):
         mem_free = mem_tot - mem_used
         jobs = minfo.get('jobs','')
         jset = set()
+        task_cnt = 0
         for x in jobs.split(','):
+            if x == '':
+                continue
             t = x.find('/')
             x = x[:t] if t > -1 else x
             jset.add(x)
+            task_cnt += 1
         job_cnt = len(jset)
         comment = minfo.get('comment', '')
         model = minfo.get('resources_available.model','')
         partition = minfo.get('partition', '')
         queue = minfo.get('queue', '')
-        resvs = minfo.get('resv', '').split(',')
+        resvs = [x.strip() for x in minfo.get('resv', '').split(',')]
         state = minfo.get('state', '')
         # Look for interesting info about MoM
         interest = []
@@ -713,7 +717,47 @@ def display_server_hdr(server, args, opts_W):
         # Check for reservations on node
         if resvs and resvs[0] != '':
             r = format_resvs(all_resvs, mom_name, resvs)
-            print(mom_name, r)
+            if r:
+                interest.append(r)
+        if comment:
+            interest.append(comment)
+        interest = ' '.join(interest)
+        mom_row = [mom_name, str(cpus_used), str(cpus_free), ensuffix(mem_used),
+            ensuffix(mem_free), str(task_cnt), str(job_cnt), interest]
+        mom_list.append(mom_row)
+    # TODO Handle summarizing and detail
+    zrows = mom_list
+    if len(zrows) > 0:
+        print()
+        fl = []
+        fl.append(gen_field('host', 'Host', {'rj':'lr'}, None, None))
+        fl.append(gen_field('cpus', ['CPUs', 'used'], {'hj':'r', 'hs':'/'}, None, None))
+        fl.append(gen_field('cfree', 'free', {'hj':'l', 'rj':'r'}, None, None))
+        fl.append(gen_field('mem', ['Mem', 'used'], {'hj':'r', 'hs':'/'}, None, None))
+        fl.append(gen_field('mfree', 'free', {'hj':'l', 'rj':'r'}, None, None))
+        fl.append(gen_field('tasks', 'Tasks', {'hj':'r'}, None, None))
+        fl.append(gen_field('jobs', 'Jobs',{'hj':'r'}, None, None))
+        fl.append(gen_field('info', 'Info', None, None, None))
+        dflt_flds = ['host', 'cpus', 'cfree', 'mem', 'mfree', 'tasks', 'jobs', 'info']
+        mom_optW = []
+        mom_fmtr = NAS_field_format(dflt_flds, verbose, mom_optW)
+        mom_fmtr.known_fields = fl
+        (field_list, attr_list, errs) = mom_fmtr.collect_fields()
+        # TODO
+        mom_optW.extend(['fmt_mem=maxw:0 hs: ', 'fmt_mfree=maxw:0'])
+        rc = mom_fmtr.adjust_formats(field_list)
+        if rc != True:
+            print(rc, file=sys.stderr)
+        mom_fmtr.field_list = field_list
+        c = layout.Config()
+        for fld in mom_fmtr.field_list:
+            title = fld['title']
+            if not title:
+                title = fld['name']
+            c.add_field(title, **fld['format'])
+        rows = layout.layout(c, zrows)
+        for r in rows:
+            print(' ',r.rstrip())
 
 def gen_field_list():
     '''Generate list of known fields
@@ -960,7 +1004,7 @@ def format_resvs(all_resvs, host, resv_list):
         else:
             fmt = r'Resv until %H:%M'
         the_time = end
-    return time.strftime(fmt, localtime(the_time))
+    return time.strftime(fmt, time.localtime(the_time))
 
 if __name__ == '__main__':
     sys.exit(main())
