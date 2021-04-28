@@ -356,12 +356,15 @@ def test():
     print(layout_field('e', '.', 6, 'abcdefg', '*'))
     print(layout_field('e', '.', 10, 'abcdefg'))
 
+    print(layout_field('l', '.', 0, 'abcdef'))
+
     c = Config()
     c.add_field('fld1')
     c.add_field('fld2', maxw = 3, hj = 'r', hs = '|', rf = '0')
     c.add_field(['fld3', 'cont'], df = '+=', hj = 'r', hs = '')
-    r = layout(c, [['tom', '0', 'one'], ['dick', '1', 'two'],
-        ['harry', '1234', 'three']])
+    c.add_field('fld4', maxw = 0)
+    r = layout(c, [['tom', '0', 'one', 'hidden'], ['dick', '1', 'two', ''],
+        ['harry', '1234', 'three', 'boo']])
     print('\n'.join(r))
     print(repr(r))
 
