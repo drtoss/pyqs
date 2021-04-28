@@ -42,7 +42,7 @@ class NAS_field_format(object):
         opt_str = mo.group(2).strip()
         opts = []
         while opt_str != '':
-            mo = re.match(r'(\w+):\s*([^ ]+)(.*)', opt_str)
+            mo = re.match(r'(\w+):\s*([^ ]*)(.*)', opt_str)
             if not mo:
                 errlist.append("Garbage in format spec for %s: %s" % \
                     (name, opt_str))
