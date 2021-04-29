@@ -115,7 +115,9 @@ def load_sysexits(prefix):
         except OSError:
             pass
     # Append any user's sysexit code
-    home = os.path.expanduser('~')
+    home = os.environ.get('HOME')
+    if not home:
+        home = os.path.expanduser('~')
     if home != None:
         path = os.path.join(home, '.%s_sysexits' % prefix)
         try:
