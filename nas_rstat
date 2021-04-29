@@ -21,7 +21,7 @@ sys.path.append(os.path.join(PBS_EXEC, 'lib', 'site'))
 
 import pbs_ifl as ifl
 from nas_utils import *
-from nas_pbsutil import get_server
+from nas_pbsutil import get_server, load_sysexits
 import nas_layout as layout
 import nas_field_format
 from nas_field_format import NAS_field_format,gen_field
@@ -85,7 +85,7 @@ def main():
         print("Cannot get PBS configuration information", file=sys.stderr)
         return 1
     # Load possible user or system overrides
-    more_code = load_sysexits()
+    more_code = load_sysexits('rstat')
     if more_code:
         prog = compile(more_code, 'sysexit code', 'exec')
         exec(prog, globals(), locals())
@@ -265,35 +265,6 @@ def get_resv_info(resvids, attr_list):
     if verbose > 1:
         print (bs)
     return bs
-
-def load_sysexits():
-    '''Load text of sysexit overrides
-
-    Returns:
-        Catenation of all sysexit file contents
-    '''
-    code = ''
-    # Load system sysexit, if present.
-    pbs_home = pbs_conf.pbs_home_path
-    if pbs_home:
-        path = os.path.join(pbs_home, 'lib', 'site', 'rstat_sysexits')
-        try:
-            if os.stat(path):
-                with open(path) as f:
-                    code += f.read()
-        except FileNotFoundError:
-            pass
-    # Append any user's sysexit code
-    home = os.path.expanduser('~')
-    if home != None:
-        path = os.path.join(home, '.rstat_sysexits')
-        try:
-            if os.stat(path):
-                with open(path) as f:
-                    code += f.read()
-        except FileNotFoundError:
-            pass
-    return code
 
 # Dummy sysexit routines that can be overridden by user/system
 
