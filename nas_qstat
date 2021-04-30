@@ -30,14 +30,16 @@ provides more options for selecting and formatting the output.
 '''
 
 args = None
+gNAS = False
 gNow = time.time()
 gserver_info = dict()
+host_re = None
 opts_W = list()
 pbs_conf = ifl.cvar.pbs_conf
 verbose = 0
 
 def main():
-    global verbose, args, opts_W
+    global verbose, args, opts_W, host_re
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, 30):
         try:
@@ -65,7 +67,7 @@ def main():
     thing_type.add_argument('-Q', default=False, action='store_true',
         help='Display information for queues')
     parser.add_argument('-W', action='append', metavar='display option',
-        help='options affecting field selection and disply. See qstat.1B')
+        help='Options customizing field selection and display.')
     parser.add_argument('-a', default=False, action='store_true',
         help='Display all jobs, in alternate format')
     parser.add_argument('-i', default=False, action='store_true',
@@ -81,10 +83,10 @@ def main():
     parser.add_argument('-u',
         help='Display only jobs from this user')
     parser.add_argument('--verbose', '-v', default=0, action='count',
-        help='increase debugging verbosity')
+        help='Increase debugging verbosity')
     parser.add_argument('-x', default=False, action='store_true',
         help='Include finished and moved jobs')
-    parser.add_argument('things', nargs=argparse.REMAINDER,
+    parser.add_argument('things', nargs='*',
         help='Jobs, queues, or servers to status')
 
     args = parser.parse_args()
@@ -143,7 +145,18 @@ def main():
     fmtr.field_list = field_list
     # Set formatting globals from cmd line args
     nas_field_format.set_field_vars(opts_W)
-    # Construct an IFL attribute_list of the needed PBS attributes
+    # Decide if will be filtering based on execution host
+    host_patt = check_W_str('host')
+    if host_patt == None:
+        host_patt = check_W_str('hosts')
+    if host_patt:
+        host_re = re.compile(r'\b('+host_patt.replace(',','|')+r')\b', re.I)
+    else:
+        host_re = None
+    if host_re:
+        # If we are filtering by host, make sure we ask for exec_host
+        if not 'exec_host' in attr_list:
+            attr_list.add('exec_host')
     bu = BatchUtils()
     t = (','.join(attr_list)).split(',')
     atl = bu.list_to_attrl(t)
@@ -169,14 +182,14 @@ def display_jobs(args, fmtr):
         fmtr = field formatter object
     Returns: 0 on success
     '''
-    global opts_W
+    global opts_W, host_re
 
     # Examine options to set selection and extend attributes
     selects = dict()
     extend = set()
     if args.i:
         selects['job_state'] = 'HQTW'
-    if args.r:
+    if args.r or host_re:
         selects['job_state'] = 'BERSU'
     if args.H:
         selects['job_state'] = 'FMX'
@@ -302,6 +315,7 @@ def display_jobs(args, fmtr):
         if alt_disp:
             cache_server(current_server, conn)
             display_server_hdr(current_server, args, opts_W)
+        # Get info for selected jobs
         if sel_attr:
             bs = ifl.pbs_selstat(conn, sel_attr, fmtr.atl, extend)
         else:
@@ -317,6 +331,17 @@ def display_jobs(args, fmtr):
             print(errmsg,
                 file = sys.stderr)
             continue
+        # If interested only in jobs on given host, filter the list
+        if host_re:
+            newbs = []
+            for job in bs:
+                hosts = job.get('exec_host')
+                if not hosts:
+                    continue
+                if not host_re.search(hosts):
+                    continue
+                newbs.append(job)
+            bs = newbs
         if sel_attr and names and is_jobs:
             # You cannot specify a list of names to the pbs_selstat()
             # call, so we have to filter the results ourselves when
@@ -646,6 +671,9 @@ def display_server_hdr(server, args, opts_W):
         mom_name = minfo.get('id')
         if not mom_name:
             continue
+        if host_re and not (host_re.match(mom_name) or \
+                host_re.match(minfo.get('host',''))):
+            continue
         cpus_tot = safeint(minfo.get('resources_available.ncpus'))
         cpus_used = safeint(minfo.get('resources_assigned.ncpus'))
         cpus_free = cpus_tot - cpus_used
@@ -676,7 +704,7 @@ def display_server_hdr(server, args, opts_W):
         if partition != '':
             interest.append('p=' + partition)
         # Some NAS only tweaks
-        if 'model' in opts_W:
+        if gNAS and 'model' in opts_W:
             t = minfo.get('resources_available.bigmem')
             if t == 'True':
                 interest[0:0] = ['bigmem']
@@ -697,7 +725,7 @@ def display_server_hdr(server, args, opts_W):
             elif ss == 'down':
                 is_down = True
             elif ss == 'offline':
-                if_offline = True
+                is_offline = True
             elif ss in ['Stale', 'state-unknown', 'free', '<various>']:
                 pass
             else:
@@ -727,6 +755,29 @@ def display_server_hdr(server, args, opts_W):
         mom_list.append(mom_row)
     # TODO Handle summarizing and detail
     zrows = mom_list
+    do_binning = len(zrows) >= check_W_int('node_bin_total', 10)
+    if do_binning:
+        # Sort MoM list by info field (last field)
+        zrows.sort(key=lambda mom: mom[-1])
+        node_bin_size = check_W_int('node_bin_size', 2)
+        new_rows = []
+        start = 0
+        match = zrows[start][-1]
+        # Scan sorted list, collecting nodes with similar info fields.
+        # Use dummy last entry to force out final real entries
+        for idx in range(len(zrows) + 1):
+            mom_row = zrows[idx] if idx < len(zrows) else ['HIGH  VALUE']
+            info = mom_row[-1]
+            if info != match:
+                count = idx - start
+                if count < node_bin_size:
+                    new_rows.extend(zrows[start:idx])
+                else:
+                    sum_row = summarize(zrows[start:idx])
+                    new_rows.append(sum_row)
+                match = info
+                start = idx
+        zrows = new_rows
     if len(zrows) > 0:
         print()
         fl = []
@@ -883,41 +934,75 @@ def add_server_conn(smap, svr, conn):
         smap[x] = conn
     return True
 
-def pretty_state_counts(ilist):
-    '''Convert state info into "pretty" output
+def check_W_bool(name, default=False):
+    '''Get boolean value from opts_W
 
     Args:
-        ilist = List of dicts with 'state_count' attributes to be beautified
+        name = nmae of option
+        default = value if option not present
     Returns:
-        A list of strings suitable for printing. The first element is a header
-        and the remaining are state counts, one for each element in ilist.
+        True if option present in opts_W and not set false
+        default otherwise
     '''
-    sclist = []
-    maxsn = []
-    for info in ilist:
-        state_count = info.get('state_count', '')
-        state_names = []
-        state_cnts = []
-        for one_count in state_count.split():
-            mo = re.match(r'([A-Z])\w+:(\d+)', one_count)
-            if mo:
-                state_names.append(mo.group(1))
-                state_cnts.append(mo.group(2))
-        if len(state_names) > len(maxsn):
-            maxsn = state_names
-        sclist.append(state_cnts)
-    # Deal with no data
-    if len(maxsn) < 1:
-        return ['--'] * (len(ilist) + 1)
-    # Now, use layout to make into uniform size for all elements of ilist
-    cfg = layout.Config()
-    idx = 0
-    for sn in maxsn:
-        idx += 1
-        s = '/' if idx < len(maxsn) else ''
-        cfg.add_field(sn, hf='_', hj='r', hs=s, df='')
-    scrows = layout.layout(cfg, sclist)
-    return scrows
+    global opts_W
+    namee = name + '='
+    # Last match decides, so search backward
+    for idx in range(len(opts_W)-1, -1, -1):
+        wopt = opts_W[idx]
+        # Option by itself is True
+        if wopt == name:
+            return True
+        # Examine name=value
+        if not wopt.startswith(namee):
+            continue
+        val = wopt[len(namee):].lower()
+        if val == 't' or val == 'true' or val == '1':
+            return True
+        if val == 'f' or val == 'false' or val == '0':
+            return False
+    return default
+
+def check_W_int(name, default=0):
+    '''Get integer value from opts_W
+
+    Args:
+        name = name of option
+        default = value if option not present
+    Returns:
+        Integer value of found option
+    '''
+    global opts_W
+    namee = name + '='
+    # Last match decides, so search backward
+    for idx in range(len(opts_W)-1, -1, -1):
+        wopt = opts_W[idx]
+        if not wopt.startswith(namee):
+            continue
+        # Examine name=value
+        val = wopt[len(namee):].lower()
+        try:
+            return int(val)
+        except:
+            if val == '': return default
+            if val == 't': return 1
+            if val == 'f': return 0
+    return default
+
+def check_W_str(name, default=''):
+    global opts_W
+    namee = name + '='
+    # Last match decides, so search backward
+    for idx in range(len(opts_W)-1, -1, -1):
+        wopt = opts_W[idx]
+        # Option by itself is default
+        if wopt == name:
+            return default
+        # Examine name=value
+        if not wopt.startswith(namee):
+            continue
+        val = wopt[len(namee):]
+        return val
+    return default
 
 def format_resvs(all_resvs, host, resv_list):
     '''Get reservations affecting a host
@@ -958,7 +1043,7 @@ def format_resvs(all_resvs, host, resv_list):
             return 'reservation'
         else:
             return 'reservations'
-    # Decide what to do based on earliest matchin reservation
+    # Decide what to do based on earliest matching reservation
     one_day_out = gNow + 24 * 3600
     six_days_out = gNow + 6 * 24 * 3600
     the_time = earliest
@@ -1005,6 +1090,100 @@ def format_resvs(all_resvs, host, resv_list):
             fmt = r'Resv until %H:%M'
         the_time = end
     return time.strftime(fmt, time.localtime(the_time))
+
+def pretty_state_counts(ilist):
+    '''Convert state info into "pretty" output
+
+    Args:
+        ilist = List of dicts with 'state_count' attributes to be beautified
+    Returns:
+        A list of strings suitable for printing. The first element is a header
+        and the remaining are state counts, one for each element in ilist.
+    '''
+    sclist = []
+    maxsn = []
+    for info in ilist:
+        state_count = info.get('state_count', '')
+        state_names = []
+        state_cnts = []
+        for one_count in state_count.split():
+            mo = re.match(r'([A-Z])\w+:(\d+)', one_count)
+            if mo:
+                state_names.append(mo.group(1))
+                state_cnts.append(mo.group(2))
+        if len(state_names) > len(maxsn):
+            maxsn = state_names
+        sclist.append(state_cnts)
+    # Deal with no data
+    if len(maxsn) < 1:
+        return ['--'] * (len(ilist) + 1)
+    # Now, use layout to make into uniform size for all elements of ilist
+    cfg = layout.Config()
+    idx = 0
+    for sn in maxsn:
+        idx += 1
+        s = '/' if idx < len(maxsn) else ''
+        cfg.add_field(sn, hf='_', hj='r', hs=s, df='')
+    scrows = layout.layout(cfg, sclist)
+    return scrows
+
+def summarize(nlist):
+    '''Produce one line summary of multiple nodes
+
+    Args:
+        nlist = list of node entries, where each entry is a list with
+            the following attributes
+            0 node name
+            1 CPUs allocated
+            2 CPUs free
+            3 memory allocated
+            4 memory free
+            5 task count
+            6 job count
+            7 interesting info
+    Returns:
+        List with same elements, summed
+    '''
+    from nas_field_format import unsuffix, ensuffix
+    def safeint(x):
+        try:
+            t = int(x)
+        except:
+            t = 0
+        return t
+    def safememadd(total, addend):
+        if total < 0:
+            return total
+        t = unsuffix(addend)
+        return total + t if isinstance(t, int) else -1
+    mom_count = len(nlist)
+    cpus_alloc = 0
+    cpus_free = 0
+    mem_alloc = 0
+    mem_free = 0
+    task_cnt = 0
+    job_cnt = 0
+    info = nlist[0][-1] if mom_count > 0 else ''
+    for mom_info in nlist:
+        cpus_alloc += safeint(mom_info[1])
+        cpus_free += safeint(mom_info[2])
+        mem_alloc = safememadd(mem_alloc, mom_info[3])
+        mem_free = safememadd(mem_free, mom_info[4])
+        task_cnt += safeint(mom_info[5])
+        job_cnt += safeint(mom_info[6])
+    # Create result list
+    t = 's' if mom_count != 1 else ''
+    entry = [ " %d host%1s" % (mom_count, t),
+        str(cpus_alloc),
+        str(cpus_free),
+        ensuffix(mem_alloc) if mem_alloc >= 0 else '--',
+        ensuffix(mem_free) if mem_free >= 0 else '--',
+        str(task_cnt),
+        # Due to multi-node jobs, you cannot just sum job counts.
+        # The only accurate job_counts are 0 and 1.
+        str(job_cnt) if job_cnt <= 1 else '--',
+        info]
+    return entry
 
 if __name__ == '__main__':
     sys.exit(main())
