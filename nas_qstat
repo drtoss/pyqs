@@ -606,8 +606,10 @@ def cache_server(server, conn):
     if not re.search(r'Scheduling|Active|Idle', state):
         info['mom_info'] = list()
         return info
-    atrs = ['comment', 'jobs', 'partition', 'queue', 'resv', 'state',
+    atrs = ['jobs', 'partition', 'queue', 'resv', 'state',
         'resources_available', 'resources_assigned']
+    if check_W_bool('node_comments', False):
+        atrs.append('comment')
     atrl = bu.list_to_attrl(atrs)
     mom_info = ifl.pbs_statvnode(conn, None, atrl, None)
     info['mom_info'] = mom_info
