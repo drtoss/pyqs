@@ -35,10 +35,11 @@ to pbs_rstat, but accepts field selections similarly to NAS's qstat.
 pbs_conf = ifl.cvar.pbs_conf
 verbose = 0
 args = None
+host_re = None
 opts_W = list()
 
 def main():
-    global verbose, args, opts_W
+    global verbose, args, host_re, opts_W
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, 30):
         try:
@@ -103,6 +104,17 @@ def main():
         return 1
     fmtr.field_list = field_list
     nas_field_format.set_field_vars(opts_W)
+    # Decide if will be filtering based on execution host
+    host_patt = check_W_str('host')
+    if host_patt == None:
+        host_patt = check_W_str('hosts')
+    if host_patt:
+        host_re = re.compile(r'\b('+host_patt.replace(',','|')+r')\b', re.I)
+    else:
+        host_re = None
+    if host_re:
+        # If we are filtering by host, make sure we ask for resv_nodes
+        attr_list.add('resv_nodes')
     if args.F:
         attr_list = None
     # Collect the info
@@ -137,6 +149,7 @@ def display_full(resvs, fmtr):
         resvs = list of info for reservations
         fmtr = field formatter object
     '''
+    from nas_field_format import decode_epoch_full, decode_resv_state_full
     for resv in resvs:
         resvid = resv['id']
         print("Resv ID:", resvid)
@@ -147,9 +160,9 @@ def display_full(resvs, fmtr):
             if key in ['id', 'resv_nodes', 'interactive']:
                 continue
             elif key == 'reserve_state':
-                value = fmtr.decode_state_full(value)
+                value = decode_resv_state_full(value)
             elif key in ['reserve_start', 'reserve_end', 'ctime', 'mtime']:
-                value = fmtr.decode_epoch_full(value)
+                value = decode_epoch_full(value)
             print(key, '=', value)
         print()
 
@@ -262,9 +275,36 @@ def get_resv_info(resvids, attr_list):
             bs.extend(bs1)
     if conn != None and conn >= 0:
         ifl.pbs_disconnect(conn)
+    # If filtering by host, keep only interesting reservations
+    if host_re:
+        newbs = []
+        for resv in bs:
+            resv_nodes = resv.get('resv_nodes')
+            if not resv_nodes:
+                continue
+            if not host_re.search(resv_nodes):
+                continue
+            newbs.append(resv)
+        bs = newbs
     if verbose > 1:
         print (bs)
     return bs
+
+def check_W_str(name, default=''):
+    global opts_W
+    namee = name + '='
+    # Last match decides, so search backward
+    for idx in range(len(opts_W)-1, -1, -1):
+        wopt = opts_W[idx]
+        # Option by itself is default
+        if wopt == name:
+            return default
+        # Examine name=value
+        if not wopt.startswith(namee):
+            continue
+        val = wopt[len(namee):]
+        return val
+    return default
 
 # Dummy sysexit routines that can be overridden by user/system
 
