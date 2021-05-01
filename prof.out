@@ -1,0 +1,50 @@
+Welcome to the profile statistics browser.
+tmp.pstat% tmp.pstat% tmp.pstat% Wed Apr  7 15:47:24 2021    tmp.pstat
+
+        5472343 function calls (5472132 primitive calls) in 3.421 seconds
+
+  Ordered by: cumulative time
+  List reduced from 316 to 78 due to restriction <'(nas|pbs)'>
+  List reduced from 78 to 40 due to restriction <40>
+
+  ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+       1    0.042    0.042    3.421    3.421 nas_qstat:7(<module>)
+       1    0.029    0.029    3.297    3.297 nas_qstat:39(main)
+       1    0.231    0.231    3.253    3.253 nas_qstat:155(display_jobs)
+       1    1.129    1.129    1.129    1.129 {_pbs_ifl.pbs_statjob}
+       1    0.223    0.223    0.760    0.760 nas_layout.py:5(layout)
+  389330    0.334    0.000    0.440    0.000 nas_layout.py:226(layout_field)
+  133020    0.227    0.000    0.330    0.000 nas_field_format.py:486(clocktosecs)
+   38930    0.075    0.000    0.240    0.000 nas_field_format.py:224(fmt_efficiency)
+   38930    0.060    0.000    0.230    0.000 nas_qstat:354(cmpf)
+   38930    0.035    0.000    0.195    0.000 nas_field_format.py:292(fmt_from_rsrc_tm)
+   38930    0.033    0.000    0.156    0.000 nas_field_format.py:245(fmt_elapsed)
+  155720    0.045    0.000    0.090    0.000 nas_field_format.py:179(fmt_by_attr)
+       3    0.068    0.023    0.090    0.030 nas_layout.py:206(layout_max)
+   71406    0.089    0.000    0.089    0.000 nas_field_format.py:559(secstoclock)
+   38085    0.042    0.000    0.083    0.000 nas_pbsutil.py:62(parse_jobid)
+   77860    0.058    0.000    0.077    0.000 nas_field_format.py:281(fmt_from_rsrc)
+       1    0.001    0.001    0.067    0.067 pbs_ifl.py:11(<module>)
+       1    0.039    0.039    0.065    0.065 pbs_ifl.py:13(swig_import_helper)
+   84348    0.059    0.000    0.059    0.000 nas_qstat:355(safeint)
+  155720    0.045    0.000    0.045    0.000 nas_field_format.py:184(fmt_by_name)
+   38930    0.029    0.000    0.043    0.000 nas_field_format.py:346(fmt_jobid)
+  194665    0.030    0.000    0.038    0.000 nas_layout.py:255(rightmost)
+  194665    0.029    0.000    0.037    0.000 nas_layout.py:238(leftmost)
+       1    0.011    0.011    0.011    0.011 {_pbs_ifl.pbs_loadconf}
+       1    0.006    0.006    0.006    0.006 {_pbs_ifl.pbs_connect}
+       1    0.001    0.001    0.003    0.003 nas_field_format.py:3(<module>)
+       1    0.000    0.000    0.001    0.001 nas_pbsutil.py:1(<module>)
+       1    0.000    0.000    0.000    0.000 nas_field_format.py:74(collect_fields)
+       1    0.000    0.000    0.000    0.000 nas_qstat:658(add_server_conn)
+       1    0.000    0.000    0.000    0.000 {_pbs_ifl.pbs_disconnect}
+       1    0.000    0.000    0.000    0.000 nas_pbsutil.py:98(load_sysexits)
+       1    0.000    0.000    0.000    0.000 nas_utils.py:1(<module>)
+       1    0.000    0.000    0.000    0.000 nas_field_format.py:16(adjust_formats)
+       1    0.000    0.000    0.000    0.000 nas_utils.py:4(list_to_attrl)
+       1    0.000    0.000    0.000    0.000 nas_utils.py:14(list_to_attropl)
+       1    0.000    0.000    0.000    0.000 pbs_ifl.py:858(pbs_config)
+       1    0.000    0.000    0.000    0.000 nas_qstat:567(gen_field_list)
+       7    0.000    0.000    0.000    0.000 nas_utils.py:46(str_to_attropl)
+       1    0.000    0.000    0.000    0.000 nas_layout.py:3(<module>)
+      42    0.000    0.000    0.000    0.000 nas_field_format.py:129(gen_field)
