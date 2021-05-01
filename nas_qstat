@@ -3,6 +3,7 @@
 #Purpose:Python equivalent of qstat, but with options for how
 #Purpose:to display the output.
 #Purpose:Use --help for details.
+from __future__ import print_function
 
 import sys
 import os
