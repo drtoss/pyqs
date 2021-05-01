@@ -432,12 +432,12 @@ def fmt_remaining(fi, info, opts):
     req = info.get('Resource_List.walltime', None)
     if req == None:
         return '--'
-    if info.get('r', None):
+    jstate = info.get('job_state', ' ')
+    if jstate in 'BERSU':
         elap = info.get('resources_used.walltime', '0')
         rem = clocktosecs(req) - clocktosecs(elap)
     else:
-        jstate = info.get('job_state', ' ')
-        if jstate in ['F', 'X']:
+        if jstate in 'FX':
             rem = '--'
         else:
             rem = clocktosecs(req)
