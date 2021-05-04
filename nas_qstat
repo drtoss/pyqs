@@ -670,6 +670,7 @@ def display_server_hdr(server, args, opts_W):
     all_resvs = info.get('resv_info',())
     # Collect info about each MoM
     mom_list = []
+    node_detail = check_W_bool('node_detail')
     for minfo in info.get('mom_info',()):
         mom_name = minfo.get('id')
         if not mom_name:
@@ -680,9 +681,12 @@ def display_server_hdr(server, args, opts_W):
         cpus_tot = safeint(minfo.get('resources_available.ncpus'))
         cpus_used = safeint(minfo.get('resources_assigned.ncpus'))
         cpus_free = cpus_tot - cpus_used
-        mem_tot = unsuffix(minfo.get('resources_available.mem','0'))
-        mem_used = unsuffix(minfo.get('resources_assigned.mem','0'))
-        mem_free = mem_tot - mem_used
+        if node_detail:
+            mem_tot = unsuffix(minfo.get('resources_available.mem','0'))
+            mem_used = unsuffix(minfo.get('resources_assigned.mem','0'))
+            mem_free = mem_tot - mem_used
+            str_mem_used = ensuffix(mem_used)
+            str_mem_free = ensuffix(mem_free)
         jobs = minfo.get('jobs','')
         jset = set()
         task_cnt = 0
@@ -753,12 +757,16 @@ def display_server_hdr(server, args, opts_W):
         if comment:
             interest.append(comment)
         interest = ' '.join(interest)
-        mom_row = [mom_name, str(cpus_used), str(cpus_free), ensuffix(mem_used),
-            ensuffix(mem_free), str(task_cnt), str(job_cnt), interest]
+        mom_row = [mom_name, str(cpus_tot), str(task_cnt), str(job_cnt),
+                      interest]
+        if node_detail:
+            mom_row[1:2] = [str(cpus_used), str(cpus_free),
+                str_mem_used, str_mem_free]
         mom_list.append(mom_row)
-    # TODO Handle summarizing and detail
+    # Handle summarizing and detail
     zrows = mom_list
-    do_binning = len(zrows) >= check_W_int('node_bin_total', 10)
+    t = check_W_int('node_bin_total', 10)
+    do_binning = (t > 0 and len(zrows) >= t)
     if do_binning:
         # Sort MoM list by info field (last field)
         zrows.sort(key=lambda mom: mom[-1])
@@ -774,8 +782,11 @@ def display_server_hdr(server, args, opts_W):
             if info != match:
                 count = idx - start
                 if count < node_bin_size:
+                    # If fewer similar nodes than node_bin_size, include nodes
+                    # directly
                     new_rows.extend(zrows[start:idx])
                 else:
+                    # Otherwise, summarize nodes into one entry
                     sum_row = summarize(zrows[start:idx])
                     new_rows.append(sum_row)
                 match = info
@@ -785,20 +796,26 @@ def display_server_hdr(server, args, opts_W):
         print()
         fl = []
         fl.append(gen_field('host', 'Host', {'rj':'lr'}, None, None))
-        fl.append(gen_field('cpus', ['CPUs', 'used'], {'hj':'r', 'hs':'/'}, None, None))
+        fl.append(gen_field('cpus', 'CPUs', {'hj':'r'}, None, None))
+        fl.append(gen_field('cused', ['CPUs', 'used'], {'hj':'r', 'hs':'/'}, None, None))
         fl.append(gen_field('cfree', 'free', {'hj':'l', 'rj':'r'}, None, None))
         fl.append(gen_field('mem', ['Mem', 'used'], {'hj':'r', 'hs':'/'}, None, None))
         fl.append(gen_field('mfree', 'free', {'hj':'l', 'rj':'r'}, None, None))
         fl.append(gen_field('tasks', 'Tasks', {'hj':'r'}, None, None))
         fl.append(gen_field('jobs', 'Jobs',{'hj':'r'}, None, None))
         fl.append(gen_field('info', 'Info', None, None, None))
-        dflt_flds = ['host', 'cpus', 'cfree', 'mem', 'mfree', 'tasks', 'jobs', 'info']
+        flds = ['host', 'cpus', 'tasks', 'jobs', 'info']
+        if node_detail:
+            flds[1:2] = ['cused', 'cfree', 'mem', 'mfree']
         mom_optW = []
-        mom_fmtr = NAS_field_format(dflt_flds, verbose, mom_optW)
+        mom_fmtr = NAS_field_format(flds, verbose, mom_optW)
         mom_fmtr.known_fields = fl
         (field_list, attr_list, errs) = mom_fmtr.collect_fields()
-        # TODO
-        mom_optW.extend(['fmt_mem=maxw:0 hs: ', 'fmt_mfree=maxw:0'])
+        if node_detail:
+            mom_optW.append('fmt_cpus=maxw:0 hs: ')
+        else:
+            mom_optW.extend(['fmt_cused=maxw:0 hs: ', 'fmt_cfree=maxw:0 hs: ',
+                'fmt_mem=maxw:0 hs: ', 'fmt_mfree:0 hs '])
         rc = mom_fmtr.adjust_formats(field_list)
         if rc != True:
             print(rc, file=sys.stderr)
@@ -1135,7 +1152,7 @@ def summarize(nlist):
 
     Args:
         nlist = list of node entries, where each entry is a list with
-            the following attributes
+            the following attributes when node_detail is set
             0 node name
             1 CPUs allocated
             2 CPUs free
@@ -1144,6 +1161,12 @@ def summarize(nlist):
             5 task count
             6 job count
             7 interesting info
+        When node_detail is not set, the list contains
+            0 node name
+            1 CPUs total
+            2 task count
+            3 job count
+            4 interesting info
     Returns:
         List with same elements, summed
     '''
@@ -1159,7 +1182,9 @@ def summarize(nlist):
             return total
         t = unsuffix(addend)
         return total + t if isinstance(t, int) else -1
+    node_detail = check_W_bool('node_detail')
     mom_count = len(nlist)
+    cpus_tot = 0
     cpus_alloc = 0
     cpus_free = 0
     mem_alloc = 0
@@ -1168,12 +1193,17 @@ def summarize(nlist):
     job_cnt = 0
     info = nlist[0][-1] if mom_count > 0 else ''
     for mom_info in nlist:
-        cpus_alloc += safeint(mom_info[1])
-        cpus_free += safeint(mom_info[2])
-        mem_alloc = safememadd(mem_alloc, mom_info[3])
-        mem_free = safememadd(mem_free, mom_info[4])
-        task_cnt += safeint(mom_info[5])
-        job_cnt += safeint(mom_info[6])
+        if node_detail:
+            cpus_alloc += safeint(mom_info[1])
+            cpus_free += safeint(mom_info[2])
+            mem_alloc = safememadd(mem_alloc, mom_info[3])
+            mem_free = safememadd(mem_free, mom_info[4])
+            task_cnt += safeint(mom_info[5])
+            job_cnt += safeint(mom_info[6])
+        else:
+            cpus_tot += safeint(mom_info[1])
+            task_cnt += safeint(mom_info[2])
+            job_cnt += safeint(mom_info[3])
     # Create result list
     t = 's' if mom_count != 1 else ''
     entry = [ " %d host%1s" % (mom_count, t),
@@ -1186,6 +1216,8 @@ def summarize(nlist):
         # The only accurate job_counts are 0 and 1.
         str(job_cnt) if job_cnt <= 1 else '--',
         info]
+    if not node_detail:
+        entry[1:5] = str(cpus_tot)
     return entry
 
 if __name__ == '__main__':
