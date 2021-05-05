@@ -38,6 +38,7 @@ host_re = None
 opts_W = list()
 pbs_conf = ifl.cvar.pbs_conf
 verbose = 0
+version = "0.1"
 
 def main():
     global verbose, args, opts_W, host_re
@@ -52,7 +53,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     thing_type = parser.add_mutually_exclusive_group()
     parser.add_argument('--version', action='version',
-        version='%(prog)s $Id:$')
+        version='%(prog)s ' + version)
     thing_type.add_argument('-B', default=False, action='store_true',
         help='Display information for servers')
     parser.add_argument('-G', default='b', action='store_const',
@@ -127,16 +128,21 @@ def main():
     if more_code:
         prog = compile(more_code, 'sysexit code', 'exec')
         exec(prog, globals(), locals())
+    extra_W = ()
     sysexit_post_opts(globals(), locals())
+    opts_W[0:0] = extra_W
     fmtr = NAS_field_format(default_fields, verbose, opts_W)
     fmtr.known_fields = kf
     sysexit_add_fields(globals(), locals())
-
     # Handle -W options
     # First, collect list of fields of interest and which PBS attributes
     # hold the values for those fields
     (field_list, attr_list, errs) = fmtr.collect_fields()
     if (errs):
+        # Check if should just print list of fields
+        if field_list == None:
+            print('\n'.join(errs))
+            return 0
         print(errs, file = sys.stderr)
     # Adjust formatting of selected fields, per -W fmt_xxx values
     rc = fmtr.adjust_formats(field_list)

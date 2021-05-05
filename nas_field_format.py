@@ -90,6 +90,11 @@ L           fl = list of field_info dictionaries describing field selected
     if W is None:
         W = []
     for opt in W:
+        # Check for request to list fields
+        if opt == 'o=?':
+            names = [x['name'] for x in self.known_fields]
+            errlist.append("Known fields: " + ', '.join(names))
+            return (None, None, errlist)
         # Only interested in changes to list of fields
         mo = re.match(r'o=([+-]?)(.*)', opt)
         if not mo:

@@ -105,9 +105,9 @@ def load_sysexits(prefix):
     '''
     code = ''
     # Load system sysexit, if present.
-    pbs_home = pbs_conf.pbs_home_path
-    if pbs_home:
-        path = os.path.join(pbs_home, 'lib', 'site', '%s_sysexits' % prefix)
+    pbs_exec = pbs_conf.pbs_exec_path
+    if pbs_exec:
+        path = os.path.join(pbs_exec, 'lib', 'site', '%s_sysexits' % prefix)
         try:
             if os.stat(path):
                 with open(path) as f:

@@ -1,0 +1,363 @@
+.TH NAS_QSTAT 1 "2020-05-04" Local "OpenPBS contributions"
+.SH NAME
+.B nas_qstat 
+- display status of PBS jobs, queues, or servers
+
+.SH SYNOPSIS
+.B Displaying Job Status
+.RS
+.B nas_qstat 
+[-i|-r] [-G|-M] [-J] [-n] [-s] [-t] [-x] [-W option] [[<job ID> | <destination>] ...]
+.sp
+.RE
+.B Displaying Queue Status
+.RS
+.B nas_qstat 
+-Q [<destination> ...]
+.sp
+.RE
+.B Displaying Server Status
+.RS
+.B nas_qstat 
+-B [<server> ...]
+.sp
+.RE
+.B Version Information
+.br
+.RS
+.B nas_qstat
+--version
+.sp
+.RE
+.SH DESCRIPTION
+The
+.B nas_qstat
+command displays the status of jobs, queues, or servers, writing
+the status information to standard output.
+.SH OPTIONS
+.TP
+.B -a
+Precede job information section with information about the server and
+compute resources.
+
+.TP
+.B -B
+Display status for PBS server hosts listed on command line. If none specified,
+display information for the local host's default PBS server.
+
+.TP
+.B -G
+Display memory sizes in gigabytes, rather than megabytes.
+
+.TP
+.B -H
+Selects only finished jobs or those moved to other PBS servers.
+
+.TP
+.B -J
+Display status for job arrays, but not subjobs.
+
+.TP
+.B -M
+Display memory sizes in 8 byte megawords.
+
+.TP
+.B -Q
+Display status for PBS queues. Destination operands are queue names at the
+default server. Queues at others servers can be specified as
+.IR "queue_name@server" .
+
+.TP
+.BI -W " display_option"
+Options affecting how statuses are displayed.
+See
+.B "\-W OPTIONS"
+section.
+
+.TP
+.B -i
+Selects only queued, held, or waiting jobs.
+
+.TP
+.B -n
+List the nodes where a job is running on a separate line following the job
+information.
+
+.TP
+.B -r
+Selects only running, suspended, or exiting jobs.
+
+.TP
+.B -s
+Include system comment about the job on a separate line following the job
+information.
+
+.TP
+.B -t
+Display status for jobs, job_arrays, and subjobs.
+
+.TP
+.BI -u " user"
+Select only jobs from specified user.
+
+.TP
+.B -x
+Include finished and moved jobs (if the server is configured to maintain
+job history).
+.SS -W OPTIONS
+The
+.B -W
+argument accepts many options that change what information is displayed or
+how it is displayed. Multiple options are specified using multiple
+.B -W
+instances.
+Some of the options need quoting to protect them from the shell.
+
+.TP
+.BI fmt_ name = formatting_options
+Apply specified formatting options to the field given by
+.IR name .
+Formatting options accumulate and the last one specified wins.
+.sp
+In the displayed output, each field occupies a column. Each column has three
+parts. First is one or more rows giving the title for the column
+(e.g., "User" or "Jobname").
+Next is a row of dashes to separate the titles from the field values.
+Last are the rows of values for the field.
+The formatting options for the headers, the dashes, and the values can
+be controlled individually.
+.sp
+Options are specified as a space-separated list of
+.BI name: value
+pairs. See
+.BR EXAMPLES .
+The option names are:
+.RS
+
+.TP
+.B df:
+(dash\ fill) The string to repeat to form the horizontal separator between
+the title lines and the data lines (default '-').
+
+.TP
+.B dj:
+(dash\ just) Justification to apply to separator fill. See
+.B hj:
+for values.
+
+.TP
+.B ds:
+(dash\ separator) Character between this field and the next (default
+.BR hs ).
+
+.TP
+.B dt:
+(dash\ trunc) String to indicate truncation of field (default
+.BR ht ).
+
+.TP
+.B hf:
+(header\ fill) String to fill title text to width of column (default space).
+
+.TP
+.B hj:
+(header\ just) Justification to apply to title text. Values are
+ 'l': left justified;
+ 'r': right justified;
+ 'c': centered;
+ 'lr': left justified first line, remaining right justified;
+ 'e': end justified, equivalent to left justified if text fits within
+column width. If text needs to be truncated, the trucation will happen
+in the middle and the ends will be retained.
+
+.TP
+.B hs:
+(header\ separator) Character between this field and the next (default
+space, unless
+.B maxw:
+== 0).
+
+.TP
+.B ht:
+(header\ trunc) String to indication truncation of the field (default nothing).
+
+.TP
+.B maxw:
+(max\ width) Maximum width of column.
+If not set, nas_qstat picks a width that accommodates all values.
+
+.TP
+.B minw:
+(min\ width) Minimum width of column.
+
+.TP
+.B rf:
+(row\ fill) String to fill data values to width of column (default
+.BR hf ).
+
+.TP
+.B rj:
+(row\ just) Justification to apply to data values (default
+.BR hj ).
+See
+.B hj for values.
+
+.TP
+.B rs:
+(row\ separator) Character between this field and the next (default
+.BR hs ).
+
+.TP
+.B rt:
+(row\ trunc) String to indicate truncation of field (default
+.BR ht ).
+
+.TP
+.B title:
+String to use as title for column.
+.RE
+.sp
+Ex: 
+.B "-W fmt_jobname='maxw:20 hj:e ht:...'"
+.sp
+.RS
+Notice that the settings for the dash and data rows default to the
+settings for the header rows.
+.RE
+.sp
+
+.TP
+.BI host[s]= host_pattern
+Restrict reporting of jobs to those running on nodes whose names match the
+regular expression given by
+.IR host_pattern .
+As a convenience, any commas (,) in the pattern are replaced by the
+regular expression alternative indicator (|). Thus, "hosts=mercury,jupiter"
+matches either of the the hosts "mercury" or "jupiter".
+The pattern will often need to be quoted to protect it from the shell.
+.br
+This option also selects which hosts will be reported in the nodes section
+of
+.B
+-a
+output.
+
+.TP 
+.B model
+At NAS, include the node model type in the
+.I info
+field of the
+.B -a
+node status display.
+
+.TP
+.BI node_bin_size= mmm
+When the number of nodes selected for the beginning section of the
+.B -a
+output exceeds the value of
+.BR node_bin_total ,
+then summarize groups of similar nodes only if there are at least
+.I mmm
+similar nodes. Otherwise, display the nodes individually.
+
+.TP
+.BI node_bin_total= nnn
+When generating the node information at the beginning of the
+.B -a
+output,
+if there are
+.I nnn
+or more nodes to display, then summarize similar nodes, rather than listing
+them individually. Nodes are "similar" if their "info" columns are identical.
+See also 
+.BR node_bin_size .
+
+.TP
+.B node_comments
+Include node comments in node "info" field of the
+.B -a
+output.
+
+.TP
+.B node_detail
+Replace total CPU count column in
+.B -a
+output with columns giving used and free CPUs and used and free memory for the nodes.
+
+.TP
+.BR noheader " or " -h
+Suppresses column identifier and dash lines from status output.
+Useful when output is passed to another program for analysis.
+
+.TP
+.BI o= [+-]field_list
+Change which fields are displayed.
+The
+.I
+field_list
+is a comma-separated list of field names to display.
+If the list is prefixed with '-', the given fields are removed from the display list.
+If the list is prefixed with '+', the given fields are appended to the display list.
+Specifying
+.RB ' o=? '
+requests nas_qstat to list the currently known fields and then exit.
+The known fields can be changed by the site administrator or by the user.
+The current list is acct, aoe, cnt, cpct, cput, ctime, eff, elapwallt, eligtime, eligwait, estend, eststart, exitstatus, group, jobid, jobname, lifetime, maxwallt, memory, minwallt, mission, model, nds, place, pmem, pri, qtime, queue, rank0, reqid, reqmem, remwallt, reqdwallt, runs, s, sessid, seqno, ss, stime, tsk, user, vmem.
+.SH EXIT STATUS
+Normally returns 0. Returns 1 on errors (e.g., nonexistent queue or jobid).
+
+.SH ENVIRONMENT
+
+.TP
+.B HOME
+Used to locate user's
+.I .qstat_sysexits
+file.
+If not set, the password database is consulted for the user's home directory.
+
+.TP
+.B PBS_DEFAULT
+Specifies default PBS server host. If not set, the host's PBS configuration
+file is consulted (usually
+.IR /etc/pbs.conf ).
+
+.SH FILES
+.TP
+PBS_EXEC/lib/site/qstat_sysexits
+Administrator provided python code to provide default values and
+sysexits. See
+.B SYSEXITS
+section.
+.TP
+PBS_EXEC/bin/pbs_python
+Python interpreter that runs
+.BR nas_qstat .
+.TP
+$HOME/.qstat_sysexits
+User supplied python code to provide default values and sysexits.
+See
+.B SYSEXITS
+section.
+
+.SH SYSEXITS
+.B nas_qstat
+invokes three administrator- or user- supplied routines at specific
+points during its execution.
+The routines are passed two arguments, g and l, where
+.B g
+is the global
+dictionary and
+.B l
+is the local dictionary at the point of call.
+.sp
+.I To be supplied
+.sp
+.TP
+.B sysexit_post_opts(g, l)
+Called just before
+.B -W
+options are examined to adjust formatting. This is where you might change
+the default field list and formats.
+
+.SH EXAMPLES
+.I To be supplied
