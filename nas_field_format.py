@@ -1,4 +1,14 @@
 #!/usr/bin/python3
+'''
+Module that encapsulates all the information needed by layout routines
+to format columnar fields.
+
+There is one class, NAS_field_format, whose function is just to hold
+all the relevant information for one display type.
+
+The rest of the module is functions that know how to convert various
+PBS attributes into strings.
+'''
 
 import re
 import time
@@ -7,6 +17,15 @@ import math
 class NAS_field_format(object):
 
   def __init__(self, default_fields, verbose = False, opts_W = None):
+    ''' Create new display formatter
+
+    The arguments are saved away for later use.
+
+    Args:
+        default_fields = List of names of default fields
+        verbose = boolean to enable extra debugging output
+        opts_W = List of -W command line arguments that affect formatting
+    '''
     self.default_fields = default_fields
     self.verbose = verbose
     self.W = opts_W
@@ -18,14 +37,22 @@ class NAS_field_format(object):
 
     Take a list of field_info dictionaries and modify the layout parameters
     from the -W options. The options we are interested in look like:
-    fmt_xxx="key: value key:value"
+    fmt_xxx="key:value key:value"
 
+    Instance vars:
+        W = saved -W arguments
     Args:
         fl = list of field_info data
     Returns: True if no errors, else error messages
     '''
 
     errlist = []
+    valid_keys = ('title',
+            'df', 'dj', 'ds', 'dt',
+            'hf', 'hj', 'hs', 'ht',
+            'maxw', 'minw',
+            'rf', 'rj', 'rs', 'rt'
+            )
     for wopt in self.W:
         # Is it our kind of W option?
         mo = re.match(r'fmt_(\w+)=(.+)', wopt)
@@ -39,10 +66,11 @@ class NAS_field_format(object):
                 break
         else:
             continue
+        # Parse formatting options (key:value key:value)
         opt_str = mo.group(2).strip()
         opts = []
         while opt_str != '':
-            mo = re.match(r'(\w+):\s*([^ ]*)(.*)', opt_str)
+            mo = re.match(r'(\w+)[:=]\s*([^ ]*)(.*)', opt_str)
             if not mo:
                 errlist.append("Garbage in format spec for %s: %s" % \
                     (name, opt_str))
@@ -51,6 +79,12 @@ class NAS_field_format(object):
             value = mo.group(2)
             opt_str = mo.group(3)
             opt_str = opt_str.strip() if opt_str else ''
+            # Validate keys. There's probably a better place to do this.
+            if not key in valid_keys:
+                errlist.append("Unknown formatting spec for field %s: %s" % \
+                    (name, key))
+                errlist.append("Valid specs are: " + ", ".join(valid_keys))
+                break
             opts.append((key, value))
         # Ignore if parse problem
         if opt_str != '':
@@ -66,6 +100,13 @@ class NAS_field_format(object):
             elif key in ['minw', 'maxw']:
                 fl[idx]['format'][key] = int(value)
             else:
+                # Handle special names for hard to input values
+                if value == '""' or value == "''":
+                    value = ''
+                elif value == 'space':
+                    value = ' '
+                elif value == 'tab' or value == '\\t':
+                    value = '\t'
                 fl[idx]['format'][key] = value
     if errlist:
         return '\n'.join(errlist)
@@ -163,6 +204,11 @@ def gen_field(name, title, form, func, source, opt=None):
 # Module global values
 
 def set_field_vars(opts):
+    ''' Set global options from command line arguments
+
+    That is, certain command line arguments affect the formatting for
+    multiple field types. Check for and remember those arguments.
+    '''
     global gnow, gropt, gszunits, ghuman
 
     # gszunits = units for display of sizes
@@ -173,6 +219,15 @@ def set_field_vars(opts):
     gnow = int(time.time())
     # gropt = True if -W raw for raw values
     gropt = '-r' in opts or 'raw' in opts
+
+def set_entity_map(themap):
+    '''Save reference to entity map
+
+    Some formatters need access to share entity information.
+    Save away a reference to that info.
+    '''
+    global gshare_entity_info
+    gshare_entity_info = themap
 
 # Functions to compute specific values for display
 # fmt_xxx(fi, info, opts)
@@ -205,6 +260,13 @@ def fmt_aoe(fi, info, opts):
     if (mo):
         return mo.group(1)
     return '--'
+
+def fmt_comment(fi, info, opts):
+    rawv = fmt_by_attr(fi, info, opts)
+    if gropt or rawv == '--':
+        return rawv
+    t = str.maketrans(' \t\n\r', '____')
+    return rawv.translate(t)
 
 def fmt_date(fi, info, opts):
     rawv = fmt_by_attr(fi, info, opts)
@@ -383,6 +445,13 @@ def fmt_lifetime(fi, info, opts):
         t = '--'
     return t
 
+def fmt_mission(fi, info, opts):
+    global gshare_entity_info
+    entity = info.get('share_entity', None)
+    t = gshare_entity_info.get(entity, dict())
+    leader = t.get('leader', '--')
+    return leader
+
 modelre = re.compile(r'^(\d+)?.*\bmodel=(\w+)')
 def fmt_model(fi, info, opts):
     # Raw format: 4:ncpus=3:model=sky_gpu:bigmem=false
@@ -432,6 +501,16 @@ def fmt_queue_info(fi, info, opts):
     if t != 'True':
         stuff.append('stopped')
     return " ".join(stuff)
+
+def fmt_rank0(fi, info, opts):
+    # Raw format:  node1/0+node1/1+node2/0
+    rawv = fmt_by_attr(fi, info, opts)
+    if gropt or rawv == '--':
+        return rawv
+    rank0 = rawv.split('/',1)[0]
+    if rank0:
+        return rank0
+    return '--'
 
 def fmt_remaining(fi, info, opts):
     req = info.get('Resource_List.walltime', None)

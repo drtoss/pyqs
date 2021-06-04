@@ -3,6 +3,7 @@ from __future__ import print_function
 import re
 import pbs_ifl as ifl
 import os
+import socket
 
 pbs_conf = ifl.cvar.pbs_conf
 
@@ -106,6 +107,9 @@ def load_sysexits(prefix):
     code = ''
     # Load system sysexit, if present.
     pbs_exec = pbs_conf.pbs_exec_path
+    t = os.environ.get('NAS_QSTAT_EXEC')
+    if t:
+        pbs_exec = t
     if pbs_exec:
         path = os.path.join(pbs_exec, 'lib', 'site', '%s_sysexits' % prefix)
         try:
@@ -134,6 +138,9 @@ def sysexit_post_opts(g, l):
     pass
 
 def sysexit_add_fields(g, l):
+    pass
+
+def sysexit_set_server(g, l):
     pass
 
 def sysexit_post_statresv(g, l):

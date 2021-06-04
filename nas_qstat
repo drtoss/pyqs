@@ -21,19 +21,25 @@ from nas_utils import BatchUtils
 from nas_pbsutil import *
 import nas_layout as layout
 import nas_field_format
-from nas_field_format import NAS_field_format,gen_field,clocktosecs
+from nas_field_format import NAS_field_format,gen_field,clocktosecs,\
+    secstoclock,set_entity_map
 
 long_desc = '''Display information about jobs, queues, or servers
 
 This command displays information about PBS jobs, queues, or servers,
-writing the status to standard output. It is similar to PBS's qstat, but
+writing the status to standard output. It is similar to OpenPBS's qstat, but
 provides more options for selecting and formatting the output.
 '''
 
 args = None
 gNAS = False
+gNAS_job_data = {}
 gNow = time.time()
+ghostname = ''
+ghostnameshort = ''
 gserver_info = dict()
+gshare_data = dict()
+gshare_entity_info = dict()
 host_re = None
 opts_W = list()
 pbs_conf = ifl.cvar.pbs_conf
@@ -41,7 +47,8 @@ verbose = 0
 version = "0.1"
 
 def main():
-    global verbose, args, opts_W, host_re
+    global gNAS, verbose, args, opts_W, host_re
+    global ghostname, ghostnameshort
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, 30):
         try:
@@ -71,7 +78,7 @@ def main():
     parser.add_argument('-W', action='append', metavar='display option',
         help='Options customizing field selection and display.')
     parser.add_argument('-a', default=False, action='store_true',
-        help='Display all jobs, in alternate format')
+        help='Include information about server and compute resources')
     parser.add_argument('-i', default=False, action='store_true',
         help='Select queued, held, or waiting jobs')
     parser.add_argument('-n', default=False, action='store_true',
@@ -99,6 +106,7 @@ def main():
         return 1
 
     # Look at -B, -Q, and -a options to decide on default list of fields
+    do_jobs = False
     if args.Q:
         default_fields = ['q_name', 'q_ncpus', 'q_ncpus_def', 'q_time', 'q_time_def', 'q_jm', 'state_count', 'q_pr', 'q_info']
         kf = gen_field_list_Q()
@@ -106,6 +114,7 @@ def main():
         default_fields = ['server_name', 'jm', 'state_count', 'default_queue', 'info']
         kf = gen_field_list_B()
     else:
+        do_jobs = True
         default_fields = ['jobid', 'user', 'queue', 'jobname', 'tsk', 'nds',
             'reqdwallt', 's', 'elapwallt', 'eff']
         kf = gen_field_list()
@@ -121,16 +130,20 @@ def main():
     opts_W = args.W
     if opts_W is None:
         opts_W = list()
+    gNAS = check_W_bool('NAS')
     # Make units for sizes available in opt_W
     opts_W.append(args.size_units)
+    # Get our hostname
+    ghostname = socket.gethostname()
+    ghostnameshort = ghostname.split('.')[0]
     # Load possible user or system overrides
     more_code = load_sysexits('qstat')
     if more_code:
         prog = compile(more_code, 'sysexit code', 'exec')
         exec(prog, globals(), locals())
-    extra_W = ()
+    default_W = []
     sysexit_post_opts(globals(), locals())
-    opts_W[0:0] = extra_W
+    opts_W[0:0] = default_W
     fmtr = NAS_field_format(default_fields, verbose, opts_W)
     fmtr.known_fields = kf
     sysexit_add_fields(globals(), locals())
@@ -156,17 +169,39 @@ def main():
     host_patt = check_W_str('host')
     if host_patt == None:
         host_patt = check_W_str('hosts')
+    # Convert list in form aaa,bbb,ccc to pattern alternative aaa|bbb|ccc
+    # and compile it.
     if host_patt:
         host_re = re.compile(r'\b('+host_patt.replace(',','|')+r')\b', re.I)
     else:
         host_re = None
-    if host_re:
+    if do_jobs and host_re:
         # If we are filtering by host, make sure we ask for exec_host
-        if not 'exec_host' in attr_list:
-            attr_list.add('exec_host')
+        attr_list.add('exec_host')
+    # Similarly, -n requires exec_host and -s requires comment
+    if do_jobs and args.n:
+        attr_list.add('exec_host')
+    if do_jobs and args.s:
+        attr_list.add('comment')
+    # If filtering by user/job, make sure we have those
+    if check_W_str('u'):
+        attr_list.add('Job_Owner')
+        attr_list.add('Job_Name')
+    # Build list of attributes we need to ask for.
     bu = BatchUtils()
     t = (','.join(attr_list)).split(',')
-    atl = bu.list_to_attrl(t)
+    while '' in t:
+        t.remove('')
+    # An empty attribute list is rejected. For servers and queues, just
+    # ask for everything. For jobs, ask for something easy.
+    if len(t) > 0:
+        atl = bu.list_to_attrl(t)
+    else:
+        if do_jobs:
+            t = ['job_state']
+            atl = bu.list_to_attrl(t)
+        else:
+            atl = None
     fmtr.atl = atl
 
     # Last, get and display requested information
@@ -223,7 +258,6 @@ def display_jobs(args, fmtr):
 
     # Gather data from server
     server_conn = {'': None, None: None}
-    rows = []
     bu = BatchUtils()
     sel_attr = bu.dict_to_attropl(selects, ifl.EQ)
     things = args.things
@@ -318,10 +352,20 @@ def display_jobs(args, fmtr):
         if conn == -1:
             # Known bad server name, skip
             continue
+        # If running at NAS, cache share & priority info
+        if gNAS:
+            cache_shares(current_server)
+            extract_share_info(current_server)
+            extract_job_info(current_server)
+        set_entity_map(gshare_entity_info)
+        # Give sysexits a chance to adjust things based on server
+        sysexit_set_server(globals(), locals())
         # Display server header, if requested
         if alt_disp:
             cache_server(current_server, conn)
             display_server_hdr(current_server, args, opts_W)
+        if gNAS and check_W_int('shares', 0):
+            display_shares(gshare_entity_info)
         # Get info for selected jobs
         if sel_attr:
             bs = ifl.pbs_selstat(conn, sel_attr, fmtr.atl, extend)
@@ -338,6 +382,8 @@ def display_jobs(args, fmtr):
             print(errmsg,
                 file = sys.stderr)
             continue
+        if gNAS:
+            plug_job_info(bs)
         # If interested only in jobs on given host, filter the list
         if host_re:
             newbs = []
@@ -349,10 +395,35 @@ def display_jobs(args, fmtr):
                     continue
                 newbs.append(job)
             bs = newbs
+        # If interested only in specific user jobs, filter the list
+        ulist = check_W_str('u')
+        if ulist:
+            patts = ulist.split(',')
+            patt_re = []
+            for t in patts:
+                if not '#' in t:
+                    t = t + '#.*'
+                # Convert negated patterns to negative look-ahead
+                if t.startswith('!'):
+                    t = '(?!' + t[1:] + ').*'
+                try:
+                    r = re.compile(t + '$')
+                except:
+                    continue
+                patt_re.append(r)
+            newbs = []
+            for job in bs:
+                owner = job.get('Job_Owner','').split('@')[0]
+                jobname = job.get('Job_Name','')
+                for r in patt_re:
+                    if r.match(owner + '#' + jobname):
+                        newbs.append(job)
+                        break
+            bs = newbs
         if sel_attr and names and is_jobs:
             # You cannot specify a list of names to the pbs_selstat()
             # call, so we have to filter the results ourselves when
-            # explicit request ID were given.
+            # explicit request IDs were given.
             newbs = []
             name_set = set(names)
             found = set()
@@ -370,8 +441,7 @@ def display_jobs(args, fmtr):
         if bs:
             info.extend(bs)
         names = []
-        # End of idx loop
-        # End of null things test
+    # End of idx loop
     # Close server connections
     for conn in set(server_conn.values()):
         if conn != None and conn != -1:
@@ -397,7 +467,7 @@ def display_jobs(args, fmtr):
                 k5 = 0
             return (k1, -k2, k3, -k4, -k5, i)
         elif st in 'Q':
-            k2 = safeint(job.get('spri','0'))
+            k2 = safeint(job.get('spri','999999'))
             k3 = safeint(job.get('Priority','0'))
             k4 = safeint(job.get('Resource_List.nodect','0'))
             k5 = clocktosecs(job.get('Resource_List.walltime',''))
@@ -407,7 +477,7 @@ def display_jobs(args, fmtr):
             k6 = p
             k7 = safeint(s)
             k8 = safeint(a.strip('[]') if a else '0')
-            return (k1, -k2, -k3, -k4, -k5, k6, k7, k8, i)
+            return (k1, k2, -k3, -k4, -k5, k6, k7, k8, i)
         (s, p, _, a, _) = parse_jobid(job.get('id','1.unknown'))
         k2 = p
         k3 = safeint(s)
@@ -415,6 +485,7 @@ def display_jobs(args, fmtr):
         return (k1, k2, k3, k4, i)
     tags = sorted(range(len(info)), key=cmpf)
     # Display info
+    rows = []
     for jobi in tags:
         job = info[jobi]
         row = list()
@@ -423,10 +494,25 @@ def display_jobs(args, fmtr):
             row.append(func(f, job, opts_W))
         rows.append(row)
     if rows:
+        new_section()
         show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
         lines = layout.layout(cfg, rows, show_hdr=show_hdr)
+        hdr_count = len(lines) - len(rows)
+        i = 0
         for line in lines:
             print(line.rstrip())
+            jobi = i - hdr_count
+            if jobi >= 0 and args.n:
+                t = info[jobi].get('exec_host', None)
+                if t:
+                    print("  ", t)
+            if jobi >= 0 and args.s:
+                t = info[jobi].get('comment', None)
+                if t:
+                    if len(t) > 76:
+                        t = t[:73] + '...'
+                    print("  ", t)
+            i += 1
     return 1 if errcnt else 0
 
 def display_queues(args, fmtr):
@@ -506,6 +592,7 @@ def display_queues(args, fmtr):
             row.append(func(f, svr, opts_W))
         rows.append(row)
     if rows:
+        new_section()
         show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
         res = layout.layout(cfg, rows, show_hdr=show_hdr)
         print('\n'.join([x.rstrip() for x in res]))
@@ -584,6 +671,7 @@ def display_servers(args, fmtr):
             row.append(func(f, svr, opts_W))
         rows.append(row)
     if rows:
+        new_section()
         show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
         res = layout.layout(cfg, rows, show_hdr=show_hdr)
         print('\n'.join([x.rstrip() for x in res]))
@@ -626,6 +714,51 @@ def cache_server(server, conn):
     info['resv_info'] = resv_info
     return info
 
+def cache_shares(server):
+    '''Cache share info for server
+
+    Args:
+        server = server name
+    '''
+    global gshare_data, ghostname, ghostnameshort
+    sname = server.split('.')[0]
+    if sname in gshare_data:
+        # Already cached, done
+        return
+    # Try various places to locate file
+    pbshome = pbs_conf.pbs_home_path
+    syspath = os.path.join(pbshome, 'sched_priv', 'sortedjobs')
+    if sname == ghostnameshort:
+        # Running on server host, get file directly
+        try:
+            with open(syspath) as f:
+                data = f.read()
+        except:
+            data = None
+    else:
+        # Look for the file in various places
+        for d in ( '/home1', '/home', '/u' ):
+            fname = os.path.join(d, 'pbs_status', sname)
+            if os.path.exists(fname):
+                break
+            fname = os.path.join(d, 'pbs_status', server)
+            if os.path.exists(fname):
+                break
+        else:
+            fname = None
+        if fname:
+            try:
+                with open(fname) as f:
+                    data = f.read()
+            except:
+                data = None
+        else:
+            data = None
+    # Cache whatever results we have
+    gshare_data[server] = data
+    if server != sname:
+        gshare_data[sname] = data
+
 def display_server_hdr(server, args, opts_W):
     '''Display info about server
 
@@ -646,6 +779,7 @@ def display_server_hdr(server, args, opts_W):
     from nas_field_format import unsuffix, ensuffix
     sname = server.split('.')[0]
     info = gserver_info[sname]
+    new_section()
     print(server + ':    ', time.asctime(time.localtime()))
     # Create one-line job header
     total_jobs = safeint(info.get('total_jobs', '0'))
@@ -697,6 +831,7 @@ def display_server_hdr(server, args, opts_W):
         jset = set()
         task_cnt = 0
         for x in jobs.split(','):
+            x = x.strip()
             if x == '':
                 continue
             t = x.find('/')
@@ -787,19 +922,19 @@ def display_server_hdr(server, args, opts_W):
             info = mom_row[-1]
             if info != match:
                 count = idx - start
-                if count < node_bin_size:
+                if count <= node_bin_size:
                     # If fewer similar nodes than node_bin_size, include nodes
                     # directly
                     new_rows.extend(zrows[start:idx])
                 else:
                     # Otherwise, summarize nodes into one entry
-                    sum_row = summarize(zrows[start:idx])
+                    sum_row = summarize_nodes(zrows[start:idx])
                     new_rows.append(sum_row)
                 match = info
                 start = idx
         zrows = new_rows
     if len(zrows) > 0:
-        print()
+        new_section()
         fl = []
         fl.append(gen_field('host', 'Host', {'rj':'lr'}, None, None))
         fl.append(gen_field('cpus', 'CPUs', {'hj':'r'}, None, None))
@@ -817,11 +952,6 @@ def display_server_hdr(server, args, opts_W):
         mom_fmtr = NAS_field_format(flds, verbose, mom_optW)
         mom_fmtr.known_fields = fl
         (field_list, attr_list, errs) = mom_fmtr.collect_fields()
-        if node_detail:
-            mom_optW.append('fmt_cpus=maxw:0 hs: ')
-        else:
-            mom_optW.extend(['fmt_cused=maxw:0 hs: ', 'fmt_cfree=maxw:0 hs: ',
-                'fmt_mem=maxw:0 hs: ', 'fmt_mfree:0 hs '])
         rc = mom_fmtr.adjust_formats(field_list)
         if rc != True:
             print(rc, file=sys.stderr)
@@ -835,6 +965,90 @@ def display_server_hdr(server, args, opts_W):
         rows = layout.layout(c, zrows)
         for r in rows:
             print(' ',r.rstrip())
+
+def display_shares(emap):
+    '''Display NAS mission share info
+
+    Args:
+        emap = Cached share entity info from sortedjobs file
+    '''
+    share_opts = check_W_int('shares')
+    slist = list()
+    # Collect some info from root entry
+    item = emap.get('root', None)
+    if not item:
+        return
+    totalalloc = item['gross']
+    totalncpus = item['alloc']
+    # Visit the saved share data in the original order
+    for entity in sorted(emap, key=lambda e:emap[e]['idx']):
+        item = emap[entity]
+        gross = item['gross']
+        net = item['net']
+        alloc = item['alloc']
+        if gross == -1:
+            continue
+        if totalalloc > 0:
+            sharepct = gross * 100 // totalalloc
+        else:
+            sharepct = 0
+        (exempt, limited, borrow) = [item[x] for x in ('e', 'l', 'b')]
+        demand = item['ed'] + item['ld'] + item['bd']
+        # Skip entries with nothing to offer
+        if gross == 0 and demand == 0:
+            continue
+        shareuse = limited + borrow
+        if totalncpus > 0:
+            usepct_str = str(shareuse * 100 // totalncpus)
+        else:
+            usepct_str = '--'
+        avail = alloc - shareuse
+        if avail < 0:
+            borrowed = shareuse - alloc
+            avail = 0
+        else:
+            borrowed = 0
+        if alloc > 0:
+            t = float(shareuse) / float(alloc)
+            ratio_str = '%.2f' % t
+        else:
+            ratio_str = '--'
+        if share_opts & 2:
+            # TODO
+            backlog = 0
+            backlog_str = secstoclock(backlog, False, check_W_bool('human'))
+        if entity == 'root':
+            entity_str = 'Overall'
+        else:
+            entity_str = ' ' + entity
+        sinfo = [entity_str, str(sharepct), usepct_str, str(alloc), str(exempt),
+            str(shareuse), str(avail), str(borrowed), ratio_str, str(demand)]
+        if share_opts & 2:
+            sinfo.append(backlog_str)
+        slist.append(sinfo)
+    # Unlikely, but there might be nothing to display
+    if len(slist) == 0:
+        return
+    # Construct formatter
+    c = layout.Config()
+    c.add_field('Group')
+    c.add_field('Share%', hj = 'r')
+    c.add_field('Use%', hj = 'r')
+    c.add_field('Share', hj = 'r')
+    c.add_field('Exempt', hj = 'r')
+    c.add_field('Use', hj = 'r')
+    c.add_field('Avail', hj = 'r')
+    c.add_field('Borrowed', hj = 'r')
+    c.add_field('Ratio', hj = 'r')
+    c.add_field('Waiting', hj = 'r')
+    if share_opts & 2:
+        c.add_field('Backlog', hj = 'r')
+    # Format and print info
+    new_section()
+    show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
+    rows = layout.layout(c, slist, 0, show_hdr)
+    print('\n'.join([x.rstrip() for x in rows]))
+    return
 
 def gen_field_list():
     '''Generate list of known fields
@@ -851,6 +1065,7 @@ def gen_field_list():
     hlrj = {'hj': 'l', 'rj': 'r'}
     fl.append(gen_field('acct', 'Acct', None, 'fmt_by_attr', 'Account_Name'))
     fl.append(gen_field('aoe', 'AOE', None, 'fmt_aoe', 'schedselect'))
+    fl.append(gen_field('comment', 'Comment', None, 'fmt_by_attr', 'comment'))
     fl.append(gen_field('cnt', 'Cnt', rj, 'fmt_by_attr', None))
     fl.append(gen_field('cpct', 'Cpct', rj, 'fmt_from_rsrc', 'resources_used', 'cpupercent'))
     fl.append(gen_field('cput', 'Cput', rj, 'fmt_from_rsrc', 'resources_used', 'cput'))
@@ -861,6 +1076,7 @@ def gen_field_list():
     fl.append(gen_field('eligwait', ['Elig', 'wait'], rj, 'fmt_duration', 'eligible_time'))
     fl.append(gen_field('estend', ['Est', 'end'], None, 'fmt_est_end', 'job_state stime estimated Resource_List resources_used'))
     fl.append(gen_field('eststart', ['Est', 'start'], rj, 'fmt_future_date', 'estimated', 'start_time'))
+    fl.append(gen_field('exechost', 'Exec_host', None, 'fmt_by_attr', 'exec_host'))
     fl.append(gen_field('exitstatus', ['Exit', 'status'], rj, 'fmt_by_attr', 'Exit_status'))
     fl.append(gen_field('group', 'Group', None, 'fmt_by_attr', 'egroup'))
     fl.append(gen_field('jobid', 'JobID', None, 'fmt_jobid', None))
@@ -869,7 +1085,7 @@ def gen_field_list():
     fl.append(gen_field('maxwallt', ['Max', 'wallt'], rj, 'fmt_from_rsrc_tm', 'Resource_List', 'max_walltime'))
     fl.append(gen_field('memory', 'Memory', hlrj, 'fmt_from_rsrc_sz', 'resources_used Resource_List', 'mem'))
     fl.append(gen_field('minwallt', ['Min', 'wallt'], rj, 'fmt_from_rsrc_tm', 'Resource_List', 'min_walltime'))
-    fl.append(gen_field('mission', 'Mission', None, 'fmt_by_attr', 'TODO'))
+    fl.append(gen_field('mission', 'Mission', None, 'fmt_mission', None))
     fl.append(gen_field('model', 'Model', None, 'fmt_model', 'schedselect'))
     fl.append(gen_field('nds', 'Nds', rj, 'fmt_from_rsrc', 'resources_used Resource_List', 'nodect'))
     fl.append(gen_field('place', 'Place', None, 'fmt_by_name', 'Resource_List'))
@@ -877,7 +1093,7 @@ def gen_field_list():
     fl.append(gen_field('pri', 'Pri', rj, 'fmt_by_attr', 'Priority'))
     fl.append(gen_field('qtime', 'Qtime', None, 'fmt_date_full', 'qtime'))
     fl.append(gen_field('queue', 'Queue', None, 'fmt_by_attr', 'queue'))
-    fl.append(gen_field('rank0', 'Rank0', None, 'fmt_by_attr', 'TODO'))
+    fl.append(gen_field('rank0', 'Rank0', None, 'fmt_rank0', 'exec_host'))
     fl.append(gen_field('reqid', 'ReqID', None, 'fmt_by_attr', 'id'))
     fl.append(gen_field('reqmem', 'Reqmem', hlrj, 'fmt_from_rsrc_sz', 'Resource_List', 'mem'))
     fl.append(gen_field('remwallt', ['Rem', 'wallt'], rj, 'fmt_remaining', 'Resource_List resources_used job_state'))
@@ -1002,6 +1218,9 @@ def check_W_int(name, default=0):
     # Last match decides, so search backward
     for idx in range(len(opts_W)-1, -1, -1):
         wopt = opts_W[idx]
+        # option by itself gives 1
+        if wopt == name:
+            return 1
         if not wopt.startswith(namee):
             continue
         # Examine name=value
@@ -1029,6 +1248,116 @@ def check_W_str(name, default=''):
         val = wopt[len(namee):]
         return val
     return default
+
+def extract_job_info(server):
+    '''Extract NAS-specific info from sorted jobs data
+
+    Using the cached copy of the server's sortedjobs file, squirrel away
+    the info for each job, into gNAS_job_data, after appending the index
+    of the job in the sorted file (which represents the results of
+    scheduler's job sort.
+
+    The lines of interest have the form (tab-separated):
+
+    jobid queue user share_name starve est_start priority ncpus
+
+    Args:
+        server = server name
+    '''
+    global gNAS_job_data, gshare_data
+
+    sname = server.split('.')[0]
+    t = gshare_data.get(sname, None)
+    if not t:
+        return
+    idx = 0
+    for line in t.split('\n'):
+        if line.startswith('#') or line == '':
+            # Skip comments and empty lines
+            continue
+        (jobid, rest) = line.split('\t', 1)
+        jobid = jobid.strip()
+        gNAS_job_data[jobid] = line + '\t' + str(idx)
+        idx += 1
+
+def extract_share_info(server):
+    '''Extract share info from sortedjobs data
+
+    We create a dict of dicts for each share entity listed
+    Interesting lines have the format
+    #A     entity=[class] gross net ncpus inuse leader
+    Where entity is the mission name, or a group:user
+        gross = allocated share from shares file
+        net = gross adjusted by unavailable resources
+        ncpus = units currently in use
+        inuse = e+ed/l+ld/b+bd
+            where e = inuse, but exempt
+                l = inuse, subject to share limits
+                b = inuse, borrowed from other shares
+                d suffix = queued demands of each of the above
+        leader = base mission of allocation
+    The entry for root is special and reflects overall information.
+    Entries with gross == -1 don't have their own allocation, but use
+    the allocation given by their leader field.
+    E.g.,
+        #A              root=   520 0   2   0+0/0+0/0+0 root
+        #A               SMD=   500 500 1   0+0/0+0/0+0 SMD
+        #A               NAS=   20  20  0   0+0/0+0/1+5 NAS
+        #A dtalcott:dtalcott=   -1  0   -1  0+0/0+0/1+5 NAS
+    Args:
+        server = name of server
+    '''
+    global gshare_entity_info, gshare_data, verbose
+
+    gshare_entity_info = dict()
+    sname = server.split('.')[0]
+    t = gshare_data.get(sname, None)
+    if not t:
+        return
+    idx = 0                 # Used later to sort
+    for line in t.split('\n'):
+        if line == '' or not line.startswith('#A'):
+            continue
+        flds = line[2:].split('\t')
+        if len(flds) != 6:
+            if verbose:
+                print("Malformed line in sortedjobs file:", line,
+                    file=sys.stderr)
+            continue
+        z = flds[0].split('=')
+        if len(z) != 2:
+            if verbose:
+                print("Malformed share entity in sortedjobs file:", line,
+                    file=sys.stderr)
+            continue
+        entity = z[0].strip()
+        cls = z[1].strip()
+        key = entity if cls == '' else '<' + cls + '> ' + entity
+        try:
+            gross = int(flds[1])
+            net = int(flds[2])
+            alloc = int(flds[3])
+            inuse = flds[4]
+            leader = flds[5]
+        except:
+            if verbose:
+                print("Bad values in sortedjobs file:", line,
+                    file=sys.stderr)
+            continue
+        mo = re.match(r'(\d+)\+(\d+)/(\d+)\+(\d+)/(\d+)\+(\d+)$', inuse)
+        if not mo:
+            if verbose:
+                print("Bad usage in sortedjobs file:", line,
+                    file=sys.stderr)
+            continue
+        e, ed, l, ld, b, bd = mo.groups()
+        item = {'gross': gross, 'net': net, 'alloc': alloc,
+            'e': int(e), 'ed': int(ed), 'l': int(l), 'ld': int(ld),
+            'b': int(b), 'bd': int(bd),
+            'leader': leader, 'idx':idx}
+        idx += 1
+        gshare_entity_info[key] = item
+    return
 
 def format_resvs(all_resvs, host, resv_list):
     '''Get reservations affecting a host
@@ -1117,6 +1446,37 @@ def format_resvs(all_resvs, host, resv_list):
         the_time = end
     return time.strftime(fmt, time.localtime(the_time))
 
+new_section_called = False
+def new_section():
+    '''Output blank line
+
+    Print a blank line except before the first call
+    '''
+    global new_section_called
+    if new_section_called:
+        print()
+    new_section_called = True
+
+def plug_job_info(bs):
+    '''Add NAS-specific info to job info
+
+    Args:
+        bs = batch status from call to pbs_statjob, etc
+    Exit:
+        bs updated
+    '''
+    global gNAS_job_data
+
+    for job in bs:
+        jobid = job['id']
+        if jobid in gNAS_job_data:
+            (jid, queue, user, share, starve, est_start, pri, ncpus, idx) = \
+                gNAS_job_data[jobid].split('\t')
+            job['Priority'] = pri
+            job['share_entity'] = share
+            job['spri'] = int(idx)
+    return
+
 def pretty_state_counts(ilist):
     '''Convert state info into "pretty" output
 
@@ -1153,7 +1513,7 @@ def pretty_state_counts(ilist):
     scrows = layout.layout(cfg, sclist)
     return scrows
 
-def summarize(nlist):
+def summarize_nodes(nlist):
     '''Produce one line summary of multiple nodes
 
     Args:
@@ -1223,7 +1583,7 @@ def summarize(nlist):
         str(job_cnt) if job_cnt <= 1 else '--',
         info]
     if not node_detail:
-        entry[1:5] = str(cpus_tot)
+        entry[1:5] = [str(cpus_tot)]
     return entry
 
 if __name__ == '__main__':

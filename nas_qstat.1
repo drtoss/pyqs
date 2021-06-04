@@ -1,24 +1,24 @@
 .TH NAS_QSTAT 1 "2020-05-04" Local "OpenPBS contributions"
 .SH NAME
-.B nas_qstat 
+.B nas_qstat
 - display status of PBS jobs, queues, or servers
 
 .SH SYNOPSIS
 .B Displaying Job Status
 .RS
-.B nas_qstat 
+.B nas_qstat
 [-i|-r] [-G|-M] [-J] [-n] [-s] [-t] [-x] [-W option] [[<job ID> | <destination>] ...]
 .sp
 .RE
 .B Displaying Queue Status
 .RS
-.B nas_qstat 
+.B nas_qstat
 -Q [<destination> ...]
 .sp
 .RE
 .B Displaying Server Status
 .RS
-.B nas_qstat 
+.B nas_qstat
 -B [<server> ...]
 .sp
 .RE
@@ -217,7 +217,7 @@ See
 String to use as title for column.
 .RE
 .sp
-Ex: 
+Ex:
 .B "-W fmt_jobname='maxw:20 hj:e ht:...'"
 .sp
 .RS
@@ -242,7 +242,7 @@ of
 -a
 output.
 
-.TP 
+.TP
 .B model
 At NAS, include the node model type in the
 .I info
@@ -256,9 +256,12 @@ When the number of nodes selected for the beginning section of the
 .B -a
 output exceeds the value of
 .BR node_bin_total ,
-then summarize groups of similar nodes only if there are at least
+then collect similar nodes into groups and output a summary line for
+each group of more than
 .I mmm
-similar nodes. Otherwise, display the nodes individually.
+similar nodes.
+Otherwise, individually display the nodes in the group.
+Nodes are "similar" when their info fields are identical.
 
 .TP
 .BI node_bin_total= nnn
@@ -268,8 +271,8 @@ output,
 if there are
 .I nnn
 or more nodes to display, then summarize similar nodes, rather than listing
-them individually. Nodes are "similar" if their "info" columns are identical.
-See also 
+them individually.
+See also
 .BR node_bin_size .
 
 .TP
@@ -360,4 +363,76 @@ options are examined to adjust formatting. This is where you might change
 the default field list and formats.
 
 .SH EXAMPLES
-.I To be supplied
+.sp
+Show running jobs.
+.sp
+.EX
+\fBnas_qstat -r\fP
+                                                 Req'd    Elap
+JobID      User     Queue Jobname        TSK Nds wallt S wallt Eff
+---------- -------- ----- -------------- --- --- ----- - ----- ---
+38.server2 dtalcott workq longish_name_5   2   2 00:33 R 00:20 50%
+.EE
+.sp
+Same, but include remaining walltime.
+.sp
+.EX
+\fBnas_qstat -r -W o=+remwallt\fP
+                                                 Req'd    Elap       Rem
+JobID      User     Queue Jobname        TSK Nds wallt S wallt Eff wallt
+---------- -------- ----- -------------- --- --- ----- - ----- --- -----
+38.server2 dtalcott workq longish_name_5   2   2 00:33 R 00:24 50% 00:09
+.EE
+.sp
+Show running jobs, but limit the Jobname field to 10 characters. Long
+jobnames are truncated to a single "*" in the middle, keeping some
+characters from each end.
+.sp
+.EX
+\fBnas_qstat -r -W fmt_jobname='maxw:10 hj:e ht:*'\fP
+                                             Req'd    Elap
+JobID      User     Queue Jobname    TSK Nds wallt S wallt Eff
+---------- -------- ----- ---------- --- --- ----- - ----- ---
+39.server2 dtalcott workq long*ame_5   2   2 00:33 R 00:26 49%
+.EE
+.sp
+Show waiting jobs along with summary of node status.
+.sp
+.EX
+\fBnas_qstat -a -i\fP
+server2:     Fri May  7 16:10:01 2021
+ Server reports 4 jobs total (T:0 Q:2 H:1 W:0 R:1 E:0 B:0)
+
+  Host  CPUs Tasks Jobs Info
+  ----- ---- ----- ---- ------
+  node4    1     0    0
+  node5    0     0    0
+  node6    0     0    0
+  node7    0     0    0
+  node3    2     2    1 in-use
+                                          Req'd     Elap
+JobID      User     Queue Jobname TSK Nds wallt S  wallt Eff
+---------- -------- ----- ------- --- --- ----- - ------ ---
+21.server2 dtalcott playq STDIN     1   1 00:33 Q 365:35  --
+22.server2 dtalcott playq STDIN     1   1 00:33 Q 265:26  --
+8.server2  dtalcott playq STDIN     1   1 00:03 H  00:00  --
+.EE
+.sp
+Same, but summarize similar nodes (by setting the summarizing threshold low).
+.sp
+.EX
+\fBnas_qstat -a -i -W node_bin_total=2\fP
+server2:     Fri May  7 16:14:32 2021
+ Server reports 4 jobs total (T:0 Q:2 H:1 W:0 R:1 E:0 B:0)
+
+  Host     CPUs Tasks Jobs Info
+  -------- ---- ----- ---- ------
+   4 hosts    1     0    0
+  node3       2     2    1 in-use
+                                          Req'd     Elap
+JobID      User     Queue Jobname TSK Nds wallt S  wallt Eff
+---------- -------- ----- ------- --- --- ----- - ------ ---
+21.server2 dtalcott playq STDIN     1   1 00:33 Q 365:40  --
+22.server2 dtalcott playq STDIN     1   1 00:33 Q 265:30  --
+8.server2  dtalcott playq STDIN     1   1 00:03 H  00:00  --
+.EE

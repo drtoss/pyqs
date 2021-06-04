@@ -214,9 +214,8 @@ class Config(object):
             colw updated
         '''
         fldcnt = len(rows[0])
-        if len(colw) == 0:
-            for i in range(fldcnt):
-                colw.append(0)
+        for i in range(len(colw), fldcnt):
+            colw.append(0)
         for row in rows:
             for i in range(fldcnt):
                 t = len(row[i+skip])
