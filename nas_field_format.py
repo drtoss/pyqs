@@ -32,17 +32,16 @@ class NAS_field_format(object):
     self.known_fields = []
     self.field_list = []
 
-  def adjust_formats(self, fl):
+  def adjust_formats(self, fl, optW=None):
     '''Adjust layout options for fields
 
     Take a list of field_info dictionaries and modify the layout parameters
     from the -W options. The options we are interested in look like:
     fmt_xxx="key:value key:value"
 
-    Instance vars:
-        W = saved -W arguments
     Args:
         fl = list of field_info data
+        optW = list of -W options, default is W instance var
     Returns: True if no errors, else error messages
     '''
 
@@ -51,9 +50,11 @@ class NAS_field_format(object):
             'df', 'dj', 'ds', 'dt',
             'hf', 'hj', 'hs', 'ht',
             'maxw', 'minw',
-            'rf', 'rj', 'rs', 'rt'
+            'rf', 'rj', 'rs', 'rt', 'suppress'
             )
-    for wopt in self.W:
+    if optW == None:
+        optW = self.W
+    for wopt in optW:
         # Is it our kind of W option?
         mo = re.match(r'fmt_(\w+)=(.+)', wopt)
         if not mo:
@@ -99,6 +100,8 @@ class NAS_field_format(object):
                 fl[idx]['title'] = title
             elif key in ['minw', 'maxw']:
                 fl[idx]['format'][key] = int(value)
+            elif key in ['suppress']:
+                fl[idx]['format'][key] = bool(value)
             else:
                 # Handle special names for hard to input values
                 if value == '""' or value == "''":
@@ -685,6 +688,8 @@ def unsuffix(v):
     Returns:
         size in bytes
     '''
+    if isinstance(v, float):
+        return v        # Already converted
     mo = sizere.match(v.lower())
     if not mo:
         return v

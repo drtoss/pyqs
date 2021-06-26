@@ -64,6 +64,8 @@ def layout(config, rows, skip = 0, show_hdr = True):
             sep = ''
             for i in range(fldcnt):
                 fs = config.config[i]
+                if fs.suppress:
+                    continue
                 fval = layout_field(fs.hj, fs.hf, colw[i], row[i], fs.ht)
                 line += sep + fval
                 sep = fs.hs
@@ -74,6 +76,8 @@ def layout(config, rows, skip = 0, show_hdr = True):
             sep = ''
             for i in range(fldcnt):
                 fs = config.config[i]
+                if fs.suppress:
+                    continue
                 fval = layout_field(fs.dj, fs.df, colw[i], dashrow[i], fs.dt)
                 line += sep + fval
                 sep = fs.ds
@@ -84,6 +88,8 @@ def layout(config, rows, skip = 0, show_hdr = True):
         sep = ''
         for i in range(fldcnt):
             fs = config.config[i]
+            if fs.suppress:
+                continue
             fval = layout_field(fs.rj, fs.rf, colw[i], row[skip+i], fs.rt)
             line += sep + fval
             sep = fs.rs
@@ -98,7 +104,7 @@ class Config(object):
     class fieldspec(object):
         def __init__(self, title, df='-', dj=None, ds=None, dt='',
             hf=' ', hj='l', hs=None, ht=None, maxw=-1, minw=0,
-            rf=None, rj=None, rs=None, rt=None):
+            rf=None, rj=None, rs=None, rt=None, suppress=False):
 
             # Set contingent defaults
             if hs == None:
@@ -135,6 +141,7 @@ class Config(object):
             self.rj = rj
             self.rs = rs
             self.rt = rt
+            self.suppress = suppress
 
     def add_field(self, title, **kwargs):
         '''Add settings for one field to config.
@@ -177,9 +184,26 @@ class Config(object):
                             (default, hs)
             rt = rowtrunc   String to indicate truncation of field
                             (default, ht)
+            suppress        True to suppress field from output
         '''
         c = self.fieldspec(title, **kwargs)
         self.config.append(c)
+
+    def change_fieldspec(self, title, **kwargs):
+        '''Update a fieldspec
+
+        Change values in a fieldspec after it has been created.
+
+        Args:
+            title = value of title attribute of fieldspec to modify.
+            kwargs = keyword arguments matching those for creating a fieldspec
+        '''
+        for fs in self.config:
+            if fs.title == title:
+                for key in kwargs:
+                    value = kwargs[key]
+                    if hasattr(fs, key):
+                        setattr(fs, key, value)
 
     def bottom_just_titles(self):
         '''Bottom justify titles
@@ -191,15 +215,18 @@ class Config(object):
         Returns: A list of title pieces in same structure
         as data rows.
         '''
-        cnt = max([1 if isinstance(x.title, str) else len(x.title) for x in self.config])
+        cnt = max([1 if (isinstance(x.title, str) or x.suppress) else len(x.title) for x in self.config])
+        new_titles = list()
         for fs in self.config:
-            if isinstance(fs.title, str):
-                fs.title = [fs.title]
-            while len(fs.title) < cnt:
-                fs.title.insert(0, '')
+            tl = fs.title
+            if isinstance(tl, str):
+                tl = [tl]
+            while len(tl) < cnt:
+                tl.insert(0, '')
+            new_titles.append(tl)
         rows = list()
         for i in range(cnt):
-            flds = [x.title[i] for x in self.config]
+            flds = [x[i] for x in new_titles]
             rows.append(flds)
         return rows
 
@@ -366,6 +393,20 @@ def test():
         ['harry', '1234', 'three', 'boo']])
     print('\n'.join(r))
     print(repr(r))
+    print()
+    # Check that we can suppress a field
+    c.change_fieldspec('fld2', suppress=1)
+    r = layout(c, [['tom', '0', 'one', 'hidden'], ['dick', '1', 'two', ''],
+        ['harry', '1234', 'three', 'boo']])
+    print('\n'.join(r))
+    print()
+    # Check that we can suppress a multi-line title field, and that we
+    # can change maxw, etc.
+    c.change_fieldspec(['fld3', 'cont'], suppress=1)
+    c.change_fieldspec('fld4', maxw=999)
+    r = layout(c, [['tom', '0', 'one', 'hidden'], ['dick', '1', 'two', ''],
+        ['harry', '1234', 'three', 'boo']])
+    print('\n'.join(r))
 
 
 if __name__ == '__main__':

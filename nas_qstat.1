@@ -353,15 +353,150 @@ dictionary and
 .B l
 is the local dictionary at the point of call.
 .sp
-.I To be supplied
+This is a two-step process. Early in
+.B nas_qstat
+execution, after command-line arguments have been parsed, but before any
+.B -W
+options have been evaluated,
+.B nas_qstat
+searches in two places for snippets of python code to execute via python's
+.I compile
+and
+.I exec
+methods.
+The first place searched is
+.IR PBS_EXEC/lib/site/ ,
+where the file
+.I qstat_sysexits
+is read, if it exists.
+The second search location is
+.IR $HOME/.qstat_sysexits ,
+which is also read, if it exists.
 .sp
+The contents of these files are catenated and passed to
+.I compile
+and
+.IR exec .
+While these snippets of code can perform some actions themselves, their
+primary purpose is to override/extend routines that will be called later
+during
+.BR nas_qstat 's
+execution.
+The routines overriden or defined comprise the second step and are
+described next.
+Interesting variables directly available from the snippets are:
+.RS
 .TP
-.B sysexit_post_opts(g, l)
-Called just before
+.B args.B
+True if
+.B -B
+specified on command line.
+.TP
+.B args.Q
+True if
+.B -Q
+specified on command line.
+.TP
+.B default_fields
+A list with the names of default fields. This list can be
+edited directly, although it is preferred to make changes using the
+.B sysexit_post_opt
+routine.
+.TP
+.B stack_sysexit(old, new)
+Routine that creates a new routine that calls the
+.B old
+sysexit routine and
+then the
+.B new
+one.
+The primary use is in the user's sysexit script to call the site's
+version of that sysexit and then call the user's version.
+.RE
+
+.TP
+.B "sysexit_post_opts(g, l)"
+Called immediately after the snippets are loaded and before
 .B -W
 options are examined to adjust formatting. This is where you might change
 the default field list and formats.
+Variables of interest are:
+.RS
+.TP
+.B l('default_W')
+An empty list to which -W options can be added.
+These will appear as if added to the command line before any other
+.B -W
+options.
+See the example below.
+.RE
 
+.TP
+.B "sysexit_add_fields(g, l)"
+Called after the layout formatter has been created, but before the formatting
+options from
+.B -W
+options have been examined.
+Its purpose is to allow the site/user to define a new field and how to
+format that field.
+Surprisingly perhaps, even though
+.B sysexit_add_fields
+is called after
+.BR sysexit_post_opts ,
+the latter can include fmt_xxx options that affect how the new field(s)
+are displayed.
+
+.TP
+.B "sysexit_set_server(g, l)"
+When displaying job status, this is called after information about the
+server has been fetched, but before anything is displayed.
+If multiple servers are specified among the command line destinations,
+.B sysexit_set_server
+is called for each server.
+When called, interesting variables are:
+.RS
+.TP
+.B l['current_server']
+Has the name of the server, usually as a FQDN.
+.TP
+.B l['in_server_header']
+Set True when preparing the host list display at the beginning of
+.B -a
+output. Unset when preparing job display.
+.TP
+.B l['cfg']
+The current configuration object for laying out the display.
+Using this, you can directly change formatting options for specific
+fields.
+.TP
+.B cfg.change_fieldspec(t, ...)
+A class function allowing direct access to the object that holds
+formatting specifications for the field with the title
+.BR t .
+Note that the field is referenced by its field title, not by
+the name used on -W fmt_xxx options. E.g., field 'cpus' has title 'CPUs'.
+If you change the title via
+.BR -W fmt_xxx=title:new_title ,
+then you must use "new_title" in the call to
+.BR change_fieldspec .
+.PP
+The intended purpose of this sysexit is to enable or suppress fields from
+the output.
+Note that this cannot be done by one of the earlier sysexits because
+the actual server used is not known when those sysexits run.
+(On the other hand, if the site has only one server, then it is more efficient
+to add or remove fields using
+.IR sysexit_post_opt .)
+Further note that this routine is called too late to add or remove fields.
+Instead, you can suppress undesired fields or unsuppress fields that
+are normally not displayed.
+Fields are suppressed by setting their
+.B suppress
+field specification to
+.BR False .
+.sp
+.RE
+See the EXAMPLE SYSEXITS section for typical uses.
 .SH EXAMPLES
 .sp
 Show running jobs.
@@ -436,3 +571,103 @@ JobID      User     Queue Jobname TSK Nds wallt S  wallt Eff
 22.server2 dtalcott playq STDIN     1   1 00:33 Q 265:30  --
 8.server2  dtalcott playq STDIN     1   1 00:03 H  00:00  --
 .EE
+.SH EXAMPLE SYSEXITS
+This example shows a
+.I qstat_sysexits
+file that a site might install in
+.I PBS_EXEC/lib/site
+to enable NAS options,
+and make
+.B node_detail
+and
+.B model
+.B -W
+options default.
+The example also displays GPU information only for jobs on servers in
+a particular list ('pbspl4' in the example). For other servers, the column
+is suppressed.
+.sp
+.EX
+# Enable NAS-specific features
+globals()['gNAS'] = True
+
+# Possibly do different things based on whether we are statusing hosts,
+# queues, or jobs
+if args.B:
+    pass
+elif args.Q:
+    pass
+else:
+    # We add ngpus to default field list, if not already there
+    if 'gpus' not in default_fields:
+        try:
+            t = default_fields.index('cpus')
+        except:
+            t = len(default_fields) - 1
+        default_fields.insert(t+1, 'gpus')
+
+    # Set up routine to set default -W values
+    def site_post_opts(g, l):
+        l['default_W'].extend(['node_detail', 'model'])
+
+    sysexit_post_opts = stack_sysexit(sysexit_post_opts, site_post_opts)
+
+    # Set up routine to tweak outputs based on server
+    def site_set_server(g, l):
+        server_name = l['current_server'].split('.')[0]
+        cfg = l['cfg']
+        svr_hdr = l.get('in_server_header', False)
+        if svr_hdr:
+            if not server_name in ['pbspl4']:
+                # Disable all GPU fields in -a node output
+                cfg.change_fieldspec('GPUs', suppress=True)
+                cfg.change_fieldspec(['GPUs', 'used'], suppress=True)
+                cfg.change_fieldspec(['', 'free'], suppress=True)
+        else:
+            # Enable/disable job GPU column
+            if server_name in ['pbspl4']:
+                cfg.change_fieldspec('GPUs', suppress=False)
+            else:
+                cfg.change_fieldspec('GPUs', suppress=True)
+
+    sysexit_set_server = stack_sysexit(sysexit_set_server, site_set_server)
+
+.EE
+.PP
+The next example shows what a user might put in their
+.I $HOME/.qstat_sysexits
+file.
+This example limits the jobname field to 20 characters and uses "..."
+to indicate parts of the name have been elided.
+It also turns on the
+.B "-W human"
+option.
+The
+.B set_server
+portion of the code limits the node info of the
+.B -a
+output to 40 characters.
+
+.EX
+if args.B:
+    pass
+elif args.Q:
+    pass
+else:
+    def my_post(g, l):
+        # Keep jobname field reasonable
+        l['default_W'].extend(['fmt_jobname=maxw:20 hj:e rt:...'])
+        # Use human readable durations
+        l['default_W'].extend(['human'])
+    sysexit_post_opts = stack_sysexit(sysexit_post_opts, my_post)
+
+    def my_server(g, l):
+        svr_hdr = l.get('in_server_header', False)
+        if svr_hdr:
+            cfg = l['cfg']
+            cfg.change_fieldspec('Node Info', maxw=40)
+
+    sysexit_set_server = stack_sysexit(sysexit_set_server, my_server)
+
+.EE
+.sp

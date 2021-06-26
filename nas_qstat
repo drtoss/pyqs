@@ -22,7 +22,7 @@ from nas_pbsutil import *
 import nas_layout as layout
 import nas_field_format
 from nas_field_format import NAS_field_format,gen_field,clocktosecs,\
-    secstoclock,set_entity_map
+    secstoclock,set_entity_map,unsuffix,ensuffix
 
 long_desc = '''Display information about jobs, queues, or servers
 
@@ -35,6 +35,7 @@ args = None
 gNAS = False
 gNAS_job_data = {}
 gNow = time.time()
+gdebug = ''
 ghostname = ''
 ghostnameshort = ''
 gserver_info = dict()
@@ -47,7 +48,7 @@ verbose = 0
 version = "0.1"
 
 def main():
-    global gNAS, verbose, args, opts_W, host_re
+    global gNAS, verbose, args, opts_W, host_re, gdebug
     global ghostname, ghostnameshort
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, 30):
@@ -79,6 +80,8 @@ def main():
         help='Options customizing field selection and display.')
     parser.add_argument('-a', default=False, action='store_true',
         help='Include information about server and compute resources')
+    parser.add_argument('--debug', default='',
+        help='Debugging arguments (for developers)')
     parser.add_argument('-i', default=False, action='store_true',
         help='Select queued, held, or waiting jobs')
     parser.add_argument('-n', default=False, action='store_true',
@@ -100,6 +103,7 @@ def main():
 
     args = parser.parse_args()
     verbose = args.verbose
+    gdebug = args.debug
 
     if (ifl.pbs_loadconf(0) == 0):
         print("Cannot get PBS configuration information", file=sys.stderr)
@@ -115,7 +119,7 @@ def main():
         kf = gen_field_list_B()
     else:
         do_jobs = True
-        default_fields = ['jobid', 'user', 'queue', 'jobname', 'tsk', 'nds',
+        default_fields = ['jobid', 'user', 'queue', 'jobname', 'cpus', 'nds',
             'reqdwallt', 's', 'elapwallt', 'eff']
         kf = gen_field_list()
         if args.verbose > 2:
@@ -139,6 +143,9 @@ def main():
     # Load possible user or system overrides
     more_code = load_sysexits('qstat')
     if more_code:
+        more_code = sysexits_header + more_code
+        if args.verbose > 2:
+            print(more_code)
         prog = compile(more_code, 'sysexit code', 'exec')
         exec(prog, globals(), locals())
     default_W = []
@@ -158,11 +165,11 @@ def main():
             return 0
         print(errs, file = sys.stderr)
     # Adjust formatting of selected fields, per -W fmt_xxx values
+    fmtr.field_list = field_list
     rc = fmtr.adjust_formats(field_list)
     if rc != True:
         print(rc, file=sys.stderr)
         return 1
-    fmtr.field_list = field_list
     # Set formatting globals from cmd line args
     nas_field_format.set_field_vars(opts_W)
     # Decide if will be filtering based on execution host
@@ -192,6 +199,8 @@ def main():
     t = (','.join(attr_list)).split(',')
     while '' in t:
         t.remove('')
+    if verbose > 2:
+        print('Requested attribute list:', ', '.join(t))
     # An empty attribute list is rejected. For servers and queues, just
     # ask for everything. For jobs, ask for something easy.
     if len(t) > 0:
@@ -686,12 +695,19 @@ def cache_server(server, conn):
     Exit:
         Info about server saved in gserver_info hash
     '''
-    global gserver_info
+    global gserver_info, gdebug
     sname = server.split('.')[0]
     if sname in gserver_info:
         return gserver_info[sname]
     bu = BatchUtils()
-    bs = ifl.pbs_statserver(conn, None, None)
+    mo = re.search(r'fake_server_%s=([^\s]+)' % sname, gdebug)
+    if mo:
+        with open(mo.group(1)) as fd:
+            lines = fd.read()
+            bs = file_to_stat(lines)
+            del lines
+    else:
+        bs = ifl.pbs_statserver(conn, None, None)
     info = bs[0]
     gserver_info[sname] = info
     if info == None:
@@ -706,11 +722,28 @@ def cache_server(server, conn):
     if check_W_bool('node_comments', False):
         atrs.append('comment')
     atrl = bu.list_to_attrl(atrs)
-    mom_info = ifl.pbs_statvnode(conn, None, atrl, None)
+    mo = re.search(r'fake_vnodes_%s=([^\s]+)' % sname, gdebug)
+    if mo:
+        with open(mo.group(1)) as fd:
+            lines = fd.read()
+            mom_info = file_to_stat(lines)
+        del lines
+    else:
+        mom_info = ifl.pbs_statvnode(conn, None, atrl, None)
+    # Condense vnode info into natural vnodes if desired
+    if check_W_bool('condense_vnodes'):
+        mom_info = condense_vnode_info(mom_info)
     info['mom_info'] = mom_info
     atrs = ['reserve_end', 'reserve_start']
     atrl = bu.list_to_attrl(atrs)
-    resv_info = ifl.pbs_statresv(conn, None, atrl, None)
+    mo = re.search(r'fake_resvs_%s=([^\s]+)' % sname, gdebug)
+    if mo:
+        with open(mo.group(1)) as fd:
+            lines = fd.read()
+            resv_info = file_to_stat(lines)
+        del lines
+    else:
+        resv_info = ifl.pbs_statresv(conn, None, atrl, None)
     info['resv_info'] = resv_info
     return info
 
@@ -776,11 +809,11 @@ def display_server_hdr(server, args, opts_W):
         except:
             t = 0
         return t
-    from nas_field_format import unsuffix, ensuffix
     sname = server.split('.')[0]
     info = gserver_info[sname]
     new_section()
-    print(server + ':    ', time.asctime(time.localtime()))
+    current_server = info.get('id', server)
+    print(current_server + ':    ', time.asctime(time.localtime()))
     # Create one-line job header
     total_jobs = safeint(info.get('total_jobs', '0'))
     counts = info.get('state_count','')
@@ -821,12 +854,30 @@ def display_server_hdr(server, args, opts_W):
         cpus_tot = safeint(minfo.get('resources_available.ncpus'))
         cpus_used = safeint(minfo.get('resources_assigned.ncpus'))
         cpus_free = cpus_tot - cpus_used
+        gpus_tot = safeint(minfo.get('resources_available.ngpus'))
+        gpus_used = safeint(minfo.get('resources_assigned.ngpus'))
+        gpus_free = gpus_tot - gpus_used
         if node_detail:
             mem_tot = unsuffix(minfo.get('resources_available.mem','0'))
             mem_used = unsuffix(minfo.get('resources_assigned.mem','0'))
             mem_free = mem_tot - mem_used
             str_mem_used = ensuffix(mem_used)
             str_mem_free = ensuffix(mem_free)
+        else:
+            mem_tot = 0
+            mem_used = 0
+            mem_free = 0
+            str_mem_used = '?'
+            str_mem_free = '?'
+        # Null GPU info if no GPUs on host
+        if gpus_tot == 0:
+            str_gpus_tot = '--'
+            str_gpus_used = '--'
+            str_gpus_free = '--'
+        else:
+            str_gpus_tot = str(gpus_tot)
+            str_gpus_used = str(gpus_used)
+            str_gpus_free = str(gpus_free)
         jobs = minfo.get('jobs','')
         jset = set()
         task_cnt = 0
@@ -852,7 +903,7 @@ def display_server_hdr(server, args, opts_W):
         if partition != '':
             interest.append('p=' + partition)
         # Some NAS only tweaks
-        if gNAS and 'model' in opts_W:
+        if gNAS and check_W_bool('model'):
             t = minfo.get('resources_available.bigmem')
             if t == 'True':
                 interest[0:0] = ['bigmem']
@@ -882,6 +933,7 @@ def display_server_hdr(server, args, opts_W):
             new_states[0:0] = ['down']
         if is_offline:
             new_states[0:0] = ['offline']
+        del is_offline  # Make Cython happy
         state = ' '.join(new_states)
         # Include state in interesting info
         if state != '':
@@ -889,7 +941,15 @@ def display_server_hdr(server, args, opts_W):
         # Remove redundant down info from comment
         if is_down:
             comment = comment.replace('node down: communication closed','')
-            comment = comment.replace('  ', ' ')
+        del is_down # Make Cython happy
+        # Remove offline timestamps
+        if gNAS:
+            while True:
+                mo = re.search(r'\d\d\d\d-\d\d-\d\d \d\d:\d\d', comment)
+                if mo:
+                    comment = comment[:mo.start()] + comment[mo.end():]
+                else:
+                    break
         # Check for reservations on node
         if resvs and resvs[0] != '':
             r = format_resvs(all_resvs, mom_name, resvs)
@@ -898,12 +958,13 @@ def display_server_hdr(server, args, opts_W):
         if comment:
             interest.append(comment)
         interest = ' '.join(interest)
-        mom_row = [mom_name, str(cpus_tot), str(task_cnt), str(job_cnt),
-                      interest]
-        if node_detail:
-            mom_row[1:2] = [str(cpus_used), str(cpus_free),
-                str_mem_used, str_mem_free]
+        interest = interest.replace('  ', ' ')
+        mom_row = [mom_name, str(cpus_tot), str(cpus_used), str(cpus_free),
+            str_gpus_tot, str_gpus_used, str_gpus_free,
+            str_mem_used, str_mem_free,
+            str(task_cnt), str(job_cnt), interest]
         mom_list.append(mom_row)
+        del job_cnt # Make Cython happy
     # Handle summarizing and detail
     zrows = mom_list
     t = check_W_int('node_bin_total', 10)
@@ -938,16 +999,20 @@ def display_server_hdr(server, args, opts_W):
         fl = []
         fl.append(gen_field('host', 'Host', {'rj':'lr'}, None, None))
         fl.append(gen_field('cpus', 'CPUs', {'hj':'r'}, None, None))
-        fl.append(gen_field('cused', ['CPUs', 'used'], {'hj':'r', 'hs':'/'}, None, None))
-        fl.append(gen_field('cfree', 'free', {'hj':'l', 'rj':'r'}, None, None))
-        fl.append(gen_field('mem', ['Mem', 'used'], {'hj':'r', 'hs':'/'}, None, None))
-        fl.append(gen_field('mfree', 'free', {'hj':'l', 'rj':'r'}, None, None))
+        fl.append(gen_field('cused', ['CPUs', 'used'], {'hj':'r', 'hs':'/', 'suppress':True}, None, None))
+        fl.append(gen_field('cfree', 'free', {'hj':'l', 'rj':'r', 'suppress':True}, None, None))
+        fl.append(gen_field('gpus', 'GPUs', {'hj':'r'}, None, None))
+        fl.append(gen_field('gused', ['GPUs', 'used'], {'hj':'r', 'hs':'/', 'suppress':True}, None, None))
+        fl.append(gen_field('gfree', ['', 'free'], {'hj':'l', 'rj':'r', 'suppress':True}, None, None))
+        fl.append(gen_field('mem', ['Mem', 'used'], {'hj':'r', 'hs':'/', 'suppress':True}, None, None))
+        fl.append(gen_field('mfree', 'free', {'hj':'l', 'rj':'r', 'suppress':True}, None, None))
         fl.append(gen_field('tasks', 'Tasks', {'hj':'r'}, None, None))
         fl.append(gen_field('jobs', 'Jobs',{'hj':'r'}, None, None))
-        fl.append(gen_field('info', 'Info', None, None, None))
-        flds = ['host', 'cpus', 'tasks', 'jobs', 'info']
-        if node_detail:
-            flds[1:2] = ['cused', 'cfree', 'mem', 'mfree']
+        fl.append(gen_field('ninfo', 'Node Info', None, None, None))
+        flds = ['host', 'cpus', 'cused', 'cfree',
+                'gpus', 'gused', 'gfree',
+                'mem', 'mfree',
+                'tasks', 'jobs', 'ninfo']
         mom_optW = []
         mom_fmtr = NAS_field_format(flds, verbose, mom_optW)
         mom_fmtr.known_fields = fl
@@ -956,13 +1021,23 @@ def display_server_hdr(server, args, opts_W):
         if rc != True:
             print(rc, file=sys.stderr)
         mom_fmtr.field_list = field_list
-        c = layout.Config()
+        cfg = layout.Config()
         for fld in mom_fmtr.field_list:
             title = fld['title']
             if not title:
                 title = fld['name']
-            c.add_field(title, **fld['format'])
-        rows = layout.layout(c, zrows)
+            cfg.add_field(title, **fld['format'])
+        if node_detail:
+            cfg.change_fieldspec('CPUs', suppress=True)
+            cfg.change_fieldspec(['CPUs', 'used'], suppress=False)
+            cfg.change_fieldspec('GPUs', suppress=True)
+            cfg.change_fieldspec(['GPUs', 'used'], suppress=False)
+            cfg.change_fieldspec(['', 'free'], suppress=False)
+            cfg.change_fieldspec('free', suppress=False)
+            cfg.change_fieldspec(['Mem', 'used'], suppress=False)
+        in_server_header = True
+        sysexit_set_server(globals(), locals())
+        rows = layout.layout(cfg, zrows)
         for r in rows:
             print(' ',r.rstrip())
 
@@ -1051,10 +1126,10 @@ def display_shares(emap):
     return
 
 def gen_field_list():
-    '''Generate list of known fields
+    '''Generate list of known fields for jobs
 
     Returns: list of field_info dicts for known fields
-    The dict have these key/value pairs
+    The dicts have these key/value pairs
         name: the name of the field
         format: dict suitable for passing to layout.add_field()
         func: name of function to calculate display value
@@ -1068,6 +1143,7 @@ def gen_field_list():
     fl.append(gen_field('comment', 'Comment', None, 'fmt_by_attr', 'comment'))
     fl.append(gen_field('cnt', 'Cnt', rj, 'fmt_by_attr', None))
     fl.append(gen_field('cpct', 'Cpct', rj, 'fmt_from_rsrc', 'resources_used', 'cpupercent'))
+    fl.append(gen_field('cpus', 'CPUs', rj, 'fmt_from_rsrc', 'Resource_List', 'ncpus'))
     fl.append(gen_field('cput', 'Cput', rj, 'fmt_from_rsrc', 'resources_used', 'cput'))
     fl.append(gen_field('ctime', 'Ctime', None, 'fmt_date', 'ctime'))
     fl.append(gen_field('eff', 'Eff', rj, 'fmt_efficiency', 'resources_used'))
@@ -1078,6 +1154,7 @@ def gen_field_list():
     fl.append(gen_field('eststart', ['Est', 'start'], rj, 'fmt_future_date', 'estimated', 'start_time'))
     fl.append(gen_field('exechost', 'Exec_host', None, 'fmt_by_attr', 'exec_host'))
     fl.append(gen_field('exitstatus', ['Exit', 'status'], rj, 'fmt_by_attr', 'Exit_status'))
+    fl.append(gen_field('gpus', 'GPUs', rj, 'fmt_from_rsrc', 'Resource_List', 'ngpus'))
     fl.append(gen_field('group', 'Group', None, 'fmt_by_attr', 'egroup'))
     fl.append(gen_field('jobid', 'JobID', None, 'fmt_jobid', None))
     fl.append(gen_field('jobname', 'Jobname', None, 'fmt_by_attr', 'Job_Name'))
@@ -1104,7 +1181,6 @@ def gen_field_list():
     fl.append(gen_field('seqno', 'SeqNo', None, 'fmt_seqno', None))
     fl.append(gen_field('ss', 'Ss', None, 'fmt_jobstate', 'job_state Hold_Types'))
     fl.append(gen_field('stime', 'Stime', None, 'fmt_date', 'stime'))
-    fl.append(gen_field('tsk', 'TSK', rj, 'fmt_from_rsrc', 'Resource_List', 'ncpus'))
     fl.append(gen_field('user', 'User', None, 'fmt_by_attr', 'euser'))
     fl.append(gen_field('vmem', 'Vmem', hlrj, 'fmt_from_rsrc_sz', 'resources_used', 'vmem'))
     return fl
@@ -1248,6 +1324,119 @@ def check_W_str(name, default=''):
         val = wopt[len(namee):]
         return val
     return default
+
+def condense_vnode_info(nodes):
+    '''Sum info for vnodes into their natural vnodes
+
+    That is, assign numeric attributes for the natural vnode to the sums
+    of the attributes for the vnodes for the host.
+
+    Args:
+        nodes = list of node info dicts
+    Returns:
+        new version of the list
+    '''
+    def safeint(s):
+        try:
+            t = int(s)
+        except:
+            t = 0
+        return t
+    def safemem(s):
+        '''Return a memory value as a float number of bytes'''
+        if isinstance(s, float):
+            return s
+        t = unsuffix(s)
+        return t
+    def cmpf(item):
+        '''Ugly function to supply to sorted() to sort vnode info
+
+        The goal is for the node names to be sorted into human order,
+        which basically means digit portions sort by numeric value
+        rather than alphabetically. This routine takes the item id
+        and returns a list of alternating strings and integers.
+        Special handling is required for vnode names (abc[foo]).
+        '''
+        name = item['id']
+        parts = list()
+        flds = name.split('[', 1)
+        first_pass = True
+        for nm in flds:
+            s = 0
+            idx = 0
+            l = len(nm)
+            while idx < l:
+                s = idx
+                while idx < l:
+                    if nm[idx].isdigit():
+                        break
+                    idx = idx+1
+                cpart = nm[s:idx]
+                s = idx
+                while idx < l:
+                    if not nm[idx].isdigit():
+                        break
+                    idx = idx+1
+                npart = nm[s:idx]
+                if npart != '':
+                    npart = int(npart)
+                else:
+                    npart = -1
+                parts.extend([cpart, npart])
+            if first_pass and len(flds) > 1:
+                parts.extend(['[', -1])
+            first_pass = False
+        return parts
+
+    nat_info = None
+    nat_name = None
+    oddballs = list()
+    new_list = list()
+    ignore_states = set(['free'])
+    for ninfo in sorted(nodes, key=cmpf):
+        cur_name = ninfo.get('Mom','').split('.')[0]
+        if cur_name != nat_name:
+            # New Mom, flush condensed node info to new list
+            if nat_info:
+                new_list.append(nat_info)
+                new_list.extend(oddballs)
+            nat_info = ninfo
+            nat_name = cur_name
+            oddballs = list()
+            continue
+        # A vnode, check if there is something odd about it
+        odd = False
+        while True:
+            for a in ['queue', 'vntype']:
+                if nat_info.get(a,None) != ninfo.get(a,None):
+                    odd = True
+                    break
+            if odd: break
+            a = 'state'
+            nat = nat_info.get(a)
+            cur = ninfo.get(a)
+            if nat != cur:
+                nats = set(nat.split(','))
+                curs = set(cur.split(',')) - ignore_states
+                if not curs.issubset(nats):
+                    odd = True
+            break
+        if odd:
+            oddballs.append(ninfo)
+            continue
+        # Condense current vnode into natural node
+        for a in ['resources_available', 'resources_assigned']:
+            for r in ['mem', 'vmem']:
+                z = a+'.'+r
+                nat_info[z] = safemem(nat_info.get(z,0.0)) + safemem(ninfo.get(z,0.0))
+            for r in ['ncpus', 'ngpus']:
+                z = a+'.'+r
+                nat_info[z] = safeint(nat_info.get(z,0)) + safeint(ninfo.get(z,0))
+        # End of condensing
+    if nat_info:
+        new_list.append(nat_info)
+        new_list.extend(oddballs)
+    return new_list
 
 def extract_job_info(server):
     '''Extract NAS-specific info from sorted jobs data
@@ -1518,21 +1707,19 @@ def summarize_nodes(nlist):
 
     Args:
         nlist = list of node entries, where each entry is a list with
-            the following attributes when node_detail is set
-            0 node name
-            1 CPUs allocated
-            2 CPUs free
-            3 memory allocated
-            4 memory free
-            5 task count
-            6 job count
-            7 interesting info
-        When node_detail is not set, the list contains
+            the following attributes
             0 node name
             1 CPUs total
-            2 task count
-            3 job count
-            4 interesting info
+            2 CPUs allocated
+            3 CPUs free
+            4 GPUs total
+            5 GPUs allocated
+            6 GPUs free
+            7 memory allocated
+            8 memory free
+            9 task count
+           10 job count
+           11 interesting info
     Returns:
         List with same elements, summed
     '''
@@ -1551,39 +1738,51 @@ def summarize_nodes(nlist):
     node_detail = check_W_bool('node_detail')
     mom_count = len(nlist)
     cpus_tot = 0
-    cpus_alloc = 0
+    cpus_used = 0
     cpus_free = 0
+    gpus_tot = 0
+    gpus_used = 0
+    gpus_free = 0
     mem_alloc = 0
     mem_free = 0
     task_cnt = 0
     job_cnt = 0
     info = nlist[0][-1] if mom_count > 0 else ''
     for mom_info in nlist:
-        if node_detail:
-            cpus_alloc += safeint(mom_info[1])
-            cpus_free += safeint(mom_info[2])
-            mem_alloc = safememadd(mem_alloc, mom_info[3])
-            mem_free = safememadd(mem_free, mom_info[4])
-            task_cnt += safeint(mom_info[5])
-            job_cnt += safeint(mom_info[6])
-        else:
-            cpus_tot += safeint(mom_info[1])
-            task_cnt += safeint(mom_info[2])
-            job_cnt += safeint(mom_info[3])
+        cpus_tot += safeint(mom_info[1])
+        cpus_used += safeint(mom_info[2])
+        cpus_free += safeint(mom_info[3])
+        gpus_tot += safeint(mom_info[4])
+        gpus_used += safeint(mom_info[5])
+        gpus_free += safeint(mom_info[6])
+        mem_alloc = safememadd(mem_alloc, mom_info[7])
+        mem_free = safememadd(mem_free, mom_info[8])
+        task_cnt += safeint(mom_info[9])
+        job_cnt += safeint(mom_info[10])
     # Create result list
     t = 's' if mom_count != 1 else ''
+    if gpus_tot == 0:
+        str_gpus_tot = '--'
+        str_gpus_used = '--'
+        str_gpus_free = '--'
+    else:
+        str_gpus_tot = str(gpus_tot)
+        str_gpus_used = str(gpus_used)
+        str_gpus_free = str(gpus_free)
     entry = [ " %d host%1s" % (mom_count, t),
-        str(cpus_alloc),
+        str(cpus_tot),
+        str(cpus_used),
         str(cpus_free),
+        str_gpus_tot,
+        str_gpus_used,
+        str_gpus_free,
         ensuffix(mem_alloc) if mem_alloc >= 0 else '--',
         ensuffix(mem_free) if mem_free >= 0 else '--',
         str(task_cnt),
         # Due to multi-node jobs, you cannot just sum job counts.
         # The only accurate job_counts are 0 and 1.
-        str(job_cnt) if job_cnt <= 1 else '--',
+        str(job_cnt) if job_cnt <= 1 else '>1',
         info]
-    if not node_detail:
-        entry[1:5] = [str(cpus_tot)]
     return entry
 
 if __name__ == '__main__':

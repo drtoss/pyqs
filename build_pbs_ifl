@@ -16,12 +16,16 @@ repo=~dtalcott/work/drtoss
 	grep -v psi_t
 ) > my_config.h
 
+# Get most of Altair's BatchUtils class from ptl
 (
+	file=$repo/test/fw/ptl/lib/ptl_batchutils.py
+	if [ ! -e $file ]; then
+		file=$repo/test/fw/ptl/pbs_testlib.py
+	fi
 	echo 'from pbs_ifl import *'
 	echo
 	echo 'class BatchUtils(object):'
-	sed -n -e '/def list_to_attrl/,/def display_attrl/p' < \
-		$repo/test/fw/ptl/lib/ptl_batchutils.py | \
+	sed -n -e '/def list_to_attrl/,/def display_attrl/p' < $file | \
 		grep -v 'def display_attrl'
 ) > nas_utils.py
 

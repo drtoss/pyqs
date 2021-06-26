@@ -4,6 +4,7 @@ import re
 import pbs_ifl as ifl
 import os
 import socket
+import sys
 
 pbs_conf = ifl.cvar.pbs_conf
 
@@ -96,6 +97,46 @@ def parse_jobid(job_id):
 
     return (seq_num, parent, current, array_idx, resv_type)
 
+def file_to_stat(lines):
+    '''Convert file contents to PBS statXXX result
+
+    E.g., You might take the output from pbsnodes -av and convert it
+    to look like the result from a pbs_statvnodes() call.
+
+    Args:
+        lines = Contents of file
+    Returns:
+        List of dicts with attribute/value pairs
+    '''
+    item_list = []
+    item = None
+    line_cnt = 0
+    for line in lines.split('\n'):
+        line_cnt += 1
+        if line == '':
+            if item:
+                item_list.append(item)
+            item = None
+            continue
+        if not '=' in line:
+            if item:    # Should not happen
+                item_list.append(item)
+            # New item
+            item = dict()
+            # First line of an item has the item ID, possibly
+            # preceded by, e.g., 'Job: ' or 'Resv ID: '.
+            item['id'] = line.split(':')[-1].strip()
+            continue
+        flds = line.split('=', 1)
+        if len(flds) != 2:
+            print("Garbage input at line %d: %s" % (line_cnt, line),
+                file=sys.stderr)
+            continue
+        item[flds[0].strip()] = flds[1].strip()
+    if item:
+        item_list.append(item)
+    return item_list
+
 def load_sysexits(prefix):
     '''Load text of sysexit overrides
 
@@ -145,5 +186,29 @@ def sysexit_set_server(g, l):
 
 def sysexit_post_statresv(g, l):
     pass
+
+def stack_sysexit(old, ext):
+    '''Extend a sysexit routine
+
+    That is, given a sysexit routine foo and a new sysexit routine bar,
+    create a routine to replace foo that calls the old foo and then bar.
+    E.g.:
+        def my_post_opts(g, l):
+            pass
+        sysexit_post_opts = stack_sysexit(sysexit_post_opts, my_post_opts)
+
+    Args:
+        old = existing sysexit to stack on
+        ext = new sysexit routine to extend the sysexit.
+    Returns:
+        Extended routine
+    '''
+    def wrapper(g, l, orig=old, newer=ext):
+        orig(g, l)
+        newer(g, l)
+    return wrapper
+
+# List of known sysexits, used as prefix to site/user supplied code.
+sysexits_header = 'global sysexit_post_opts,sysexit_add_fields,sysexit_set_server,sysexit_post_statresv\n'
 
 # vi:ts=4:sw=4:expandtab
