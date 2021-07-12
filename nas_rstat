@@ -13,6 +13,7 @@ import os
 import argparse
 import re
 import subprocess
+import signal
 import socket
 import time
 
@@ -41,7 +42,7 @@ opts_W = list()
 def main():
     global verbose, args, host_re, opts_W
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
-    for i in range(1, 30):
+    for i in range(1, signal.NSIG):
         try:
             signal.signal(i, signal.SIG_DFL)
         except:

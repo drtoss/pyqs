@@ -10,6 +10,7 @@ import os
 import argparse
 import re
 import subprocess
+import signal
 import socket
 import time
 
@@ -51,7 +52,7 @@ def main():
     global gNAS, verbose, args, opts_W, host_re, gdebug
     global ghostname, ghostnameshort
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
-    for i in range(1, 30):
+    for i in range(1, signal.NSIG):
         try:
             signal.signal(i, signal.SIG_DFL)
         except:
@@ -233,7 +234,7 @@ def display_jobs(args, fmtr):
         fmtr = field formatter object
     Returns: 0 on success
     '''
-    global opts_W, host_re
+    global opts_W, host_re, gdebug
 
     # Examine options to set selection and extend attributes
     selects = dict()
@@ -376,21 +377,29 @@ def display_jobs(args, fmtr):
         if gNAS and check_W_int('shares', 0):
             display_shares(gshare_entity_info)
         # Get info for selected jobs
-        if sel_attr:
-            bs = ifl.pbs_selstat(conn, sel_attr, fmtr.atl, extend)
+        sname = current_server.split('.')[0]
+        mo = re.search(r'fake_jobs_%s=([^\s]+)' % sname, gdebug)
+        if mo:
+            with open(mo.group(1)) as fd:
+                lines = fd.read()
+                bs = file_to_stat(lines)
+                del lines
         else:
-            namelist = ','.join(names)
-            bs = ifl.pbs_statjob(conn, namelist, fmtr.atl, extend)
-        err = ifl.pbs_Errno()
-        if err:
-            errcnt += 1
-            errmsg = ifl.pbs_geterrmsg(conn)
-            if errmsg == None or errmsg == '':
-                errmsg = "error %d" % err
-            errmsg += ': ' + namelist
-            print(errmsg,
-                file = sys.stderr)
-            continue
+            if sel_attr:
+                bs = ifl.pbs_selstat(conn, sel_attr, fmtr.atl, extend)
+            else:
+                namelist = ','.join(names)
+                bs = ifl.pbs_statjob(conn, namelist, fmtr.atl, extend)
+            err = ifl.pbs_Errno()
+            if err:
+                errcnt += 1
+                errmsg = ifl.pbs_geterrmsg(conn)
+                if errmsg == None or errmsg == '':
+                    errmsg = "error %d" % err
+                errmsg += ': ' + namelist
+                print(errmsg,
+                    file = sys.stderr)
+                continue
         if gNAS:
             plug_job_info(bs)
         # If interested only in jobs on given host, filter the list

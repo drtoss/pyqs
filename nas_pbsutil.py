@@ -132,7 +132,13 @@ def file_to_stat(lines):
             print("Garbage input at line %d: %s" % (line_cnt, line),
                 file=sys.stderr)
             continue
-        item[flds[0].strip()] = flds[1].strip()
+        # Hack to recognize epoch + timestamp and convert to just epoch
+        # E.g., 1624104854 (Sat Jun 19 05:14:14 PDT 2021)
+        value = flds[1].strip()
+        mo = re.match(r'(\d{9,15}) \(', value)
+        if mo:
+            value = mo.group(1)
+        item[flds[0].strip()] = value
     if item:
         item_list.append(item)
     return item_list
