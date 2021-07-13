@@ -22,8 +22,7 @@ from nas_utils import BatchUtils
 from nas_pbsutil import *
 import nas_layout as layout
 import nas_field_format
-from nas_field_format import NAS_field_format,gen_field,clocktosecs,\
-    secstoclock,set_entity_map,unsuffix,ensuffix
+from nas_field_format import *
 
 long_desc = '''Display information about jobs, queues, or servers
 
@@ -509,7 +508,7 @@ def display_jobs(args, fmtr):
         row = list()
         for f in fmtr.field_list:
             func = getattr(nas_field_format, f['func'])
-            row.append(func(f, job, opts_W))
+            row.append(func(f, job))
         rows.append(row)
     if rows:
         new_section()
@@ -850,6 +849,7 @@ def display_server_hdr(server, args, opts_W):
     if scheduling != 'True':
         print("\t+++ Scheduling turned off.")
     all_resvs = info.get('resv_info',())
+    fmta_init(gNAS, opts_W, all_resvs, sysexit_interest, gNow)
     # Collect info about each MoM
     mom_list = []
     node_detail = check_W_bool('node_detail')
@@ -961,7 +961,7 @@ def display_server_hdr(server, args, opts_W):
                     break
         # Check for reservations on node
         if resvs and resvs[0] != '':
-            r = format_resvs(all_resvs, mom_name, resvs)
+            r = format_resvs(all_resvs, mom_name, resvs, gNow)
             if r:
                 interest.append(r)
         if comment:
@@ -1049,6 +1049,44 @@ def display_server_hdr(server, args, opts_W):
         rows = layout.layout(cfg, zrows)
         for r in rows:
             print(' ',r.rstrip())
+    # XXX New version
+    node_detail = check_W_bool('node_detail')
+    default_fields = ['host', 'cpus', 'gpus', 'mem', 'tasks', 'jobs', 'ninfo']
+    if node_detail:
+        default_fields = ['host', 'cused', 'cfree', 'gused', 'gfree', 'mem', 'mfree', 'tasks', 'jobs', 'ninfo']
+    fmtr = NAS_field_format(default_fields, verbose, opts_W, 'fmta')
+    fmtr.known_fields = gen_field_list_a()
+    sysexit_add_fields_a(globals(), locals())
+    (field_list, attr_list, errs) = fmtr.collect_fields('oa')
+    if (errs):
+        # Check if should just print list of fields
+        if field_list == None:
+            print('\n'.join(errs))
+            return 0
+        print(errs, file = sys.stderr)
+    # Adjust formatting of selected fields, per -W fmta_xxx values
+    fmtr.field_list = field_list
+    rc = fmtr.adjust_formats(field_list)
+    if rc != True:
+        print(rc, file=sys.stderr)
+        return 1
+    nas_field_format.set_field_vars(opts_W)
+    cfg = layout.Config()
+    for fld in field_list:
+        title = fld['title']
+        if not title:
+            title = fld['name']
+        cfg.add_field(title, **fld['format'])
+    mom_list = []
+    for minfo in info.get('mom_info',()):
+        mom_row = list()
+        for f in fmtr.field_list:
+            func = getattr(nas_field_format, f['func'])
+            mom_row.append(func(f, minfo))
+        mom_list.append(mom_row)
+    rows = layout.layout(cfg, mom_list)
+    for r in rows:
+        print(' ',r.rstrip())
 
 def display_shares(emap):
     '''Display NAS mission share info
@@ -1195,6 +1233,8 @@ def gen_field_list():
     return fl
 
 def gen_field_list_B():
+    '''Generate field list for server display
+    '''
     fl = []
     dr = {'dj': 'r'}
     de = {'df': '='}
@@ -1207,6 +1247,8 @@ def gen_field_list_B():
     return fl
 
 def gen_field_list_Q():
+    '''Generate field list for queue display
+    '''
     fl = []
     rr = {'rj': 'r'}
     de = {'df': '='}
@@ -1226,6 +1268,24 @@ def gen_field_list_Q():
     fl.append(gen_field('state_count', ['State count', ''], de, 'fmt_state_count', 'state_count'))
     fl.append(gen_field('q_pr', 'pr', dre, 'fmt_by_attr', 'Priority'))
     fl.append(gen_field('q_info', 'Info', de, 'fmt_queue_info', 'enabled started'))
+    return fl
+
+def gen_field_list_a():
+    '''Generate field list for -a node display
+    '''
+    fl = []
+    fl.append(gen_field('host', 'Host', {'rj':'lr'}, 'fmta_host', None))
+    fl.append(gen_field('cpus', 'CPUs', {'hj':'r'}, 'fmta_count', 'resources_available', 'ncpus sum'))
+    fl.append(gen_field('cused', ['CPUs', 'used'], {'hj':'r', 'hs':'/'}, 'fmta_used', 'resources_assigned', 'ncpus sum'))
+    fl.append(gen_field('cfree', 'free', {'hj':'l', 'rj':'r'}, 'fmta_free', 'resources_available resources_assigned', 'ncpus sum'))
+    fl.append(gen_field('gpus', 'GPUs', {'hj':'r', 'suppress':True}, 'fmta_count', 'resources_available', 'ngpus sum'))
+    fl.append(gen_field('gused', ['GPUs', 'used'], {'hj':'r', 'hs':'/', 'suppress':True}, 'fmta_used', 'resources_assigned', 'ngpus sum'))
+    fl.append(gen_field('gfree', ['', 'free'], {'hj':'l', 'rj':'r', 'suppress':True}, 'fmta_free', 'resources_available resources_assigned', 'ngpus sum'))
+    fl.append(gen_field('mem', ['Mem', 'used'], {'hj':'r', 'hs':'/'}, 'fmta_mem', 'resources_available', 'mem summem'))
+    fl.append(gen_field('mfree', 'free', {'hj':'l', 'rj':'r'}, 'fmta_mfree', 'resources_available resources_assigned', 'mem summem'))
+    fl.append(gen_field('tasks', 'Tasks', {'hj':'r'}, 'fmta_tcnt', 'jobs', 'sum'))
+    fl.append(gen_field('jobs', 'Jobs',{'hj':'r'}, 'fmta_jcnt', 'jobs', 'sumjobs'))
+    fl.append(gen_field('ninfo', 'Node Info', None, 'fmta_info', 'state comment resources_available partition queue resv'))
     return fl
 
 def add_server_conn(smap, svr, conn):
@@ -1557,7 +1617,7 @@ def extract_share_info(server):
         gshare_entity_info[key] = item
     return
 
-def format_resvs(all_resvs, host, resv_list):
+def xformat_resvs(all_resvs, host, resv_list):
     '''Get reservations affecting a host
 
     From the list of all reservations and those that apply to a host,

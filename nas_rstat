@@ -190,7 +190,7 @@ def display_standard(resvs, fmtr):
         row = list()
         for f in fmtr.field_list:
             func = getattr(nas_field_format, f['func'])
-            row.append(func(f, resv, opts_W))
+            row.append(func(f, resv))
         rows.append(row)
     if rows:
         show_hdr = '-h' not in opts_W
