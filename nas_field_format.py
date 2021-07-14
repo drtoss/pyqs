@@ -98,6 +98,8 @@ class NAS_field_format(object):
         # Update field list format with new values
         for (key, value) in opts:
             if key == 'title':
+                # Replace \_ with space
+                value.replace(r'\_', ' ')
                 # Might need to convert title to multi-line list
                 title = re.sub(r'\\n','\n',value)
                 if title != value:
@@ -181,6 +183,7 @@ L           fl = list of field_info dictionaries describing field selected
     if self.verbose:
         print("Need these attributes: %s" % ', '.join(sorted(aset)))
     return (fil, aset, '\n'.join(errlist) if errlist else None)
+
 __all__.append('NAS_field_format')
 
 def gen_field(name, title, form, func, source, opt=''):
@@ -1036,6 +1039,5 @@ def unsuffix(v):
     return value
 
 __all__.append('unsuffix')
-
 
 # vi:ts=4:sw=4:expandtab
