@@ -103,7 +103,8 @@ class Config(object):
 
     class fieldspec(object):
         def __init__(self, title, df='-', dj=None, ds=None, dt='',
-            hf=' ', hj='l', hs=None, ht=None, maxw=-1, minw=0,
+            hf=' ', hj='l', hs=None, ht=None,
+            ident=None, maxw=-1, minw=0,
             rf=None, rj=None, rs=None, rt=None, suppress=False):
 
             # Set contingent defaults
@@ -135,6 +136,7 @@ class Config(object):
             self.hj = hj
             self.hs = hs
             self.ht = ht
+            self.ident = ident
             self.maxw = int(maxw)
             self.minw = int(minw)
             self.rf = rf
@@ -189,17 +191,17 @@ class Config(object):
         c = self.fieldspec(title, **kwargs)
         self.config.append(c)
 
-    def change_fieldspec(self, title, **kwargs):
+    def change_fieldspec(self, ident, **kwargs):
         '''Update a fieldspec
 
         Change values in a fieldspec after it has been created.
 
         Args:
-            title = value of title attribute of fieldspec to modify.
+            ident = value of ident attribute of fieldspec to modify
             kwargs = keyword arguments matching those for creating a fieldspec
         '''
         for fs in self.config:
-            if fs.title == title:
+            if fs.ident == ident:
                 for key in kwargs:
                     value = kwargs[key]
                     if hasattr(fs, key):

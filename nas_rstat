@@ -184,7 +184,7 @@ def display_standard(resvs, fmtr):
         title = fld['title']
         if not title:
             title = fld['name']
-        c.add_field(title, **fld['format'])
+        c.add_field(title, ident=fld['name'], **fld['format'])
     rows = list()
     for resv in resvs:
         row = list()

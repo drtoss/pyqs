@@ -16,6 +16,7 @@ import math
 
 __all__ = list()
 
+__all__.append('NAS_field_format')
 class NAS_field_format(object):
 
   def __init__(self, default_fields, verbose = False, opts_W = None, pfx = None):
@@ -184,8 +185,7 @@ L           fl = list of field_info dictionaries describing field selected
         print("Need these attributes: %s" % ', '.join(sorted(aset)))
     return (fil, aset, '\n'.join(errlist) if errlist else None)
 
-__all__.append('NAS_field_format')
-
+__all__.append('gen_field')
 def gen_field(name, title, form, func, source, opt=''):
     '''Create a field_info dict
 
@@ -214,10 +214,10 @@ def gen_field(name, title, form, func, source, opt=''):
         'opt': opt.split()
         }
     return fi
-__all__.append('gen_field')
 
 # Module global values
 
+__all__.append('set_field_vars')
 def set_field_vars(opts):
     ''' Set global options from command line arguments
 
@@ -235,8 +235,7 @@ def set_field_vars(opts):
     # gropt = True if -W raw for raw values
     gropt = '-r' in opts or 'raw' in opts
 
-__all__.append('set_field_vars')
-
+__all__.append('set_entity_map')
 def set_entity_map(themap):
     '''Save reference to entity map
 
@@ -245,8 +244,6 @@ def set_entity_map(themap):
     '''
     global gshare_entity_info
     gshare_entity_info = themap
-
-__all__.append('set_entity_map')
 
 # Functions to compute specific values for display
 # fmt_xxx(fi, info)
@@ -582,6 +579,7 @@ def fmt_user(fi, info):
         return rawv
     return rawv.split('@')[0]
 
+__all__.append('fmta_init')
 def fmta_init(g, o, r, s, n):
     '''Save away values that might be needed by -a formatters
 
@@ -598,8 +596,6 @@ def fmta_init(g, o, r, s, n):
     allresvs = r
     sysexit_interest = s
     gnow = n
-
-__all__.append('fmta_init')
 
 def geta_from_rsrc(fi, info):
     '''Get MoM resource value from info'''
@@ -722,10 +718,10 @@ def fmta_jcnt(fi, info):
     return str(len(jset))
 
 def fmta_mem(fi, info):
-    '''Memory resource'''
+    '''Memory resource total or used'''
     v = geta_from_rsrc(fi, info)
     mem = unsuffix(v[0]) if len(v) > 0 else 0.0
-    return ensuffix(mem)
+    return ensuffix(mem) if mem > 0.0 else '--'
 
 def fmta_mfree(fi, info):
     '''Node memory free'''
@@ -735,8 +731,9 @@ def fmta_mfree(fi, info):
         used = unsuffix(v[1])
         free = totm - used
     else:
+        totm = 0.0
         free = 0.0
-    return ensuffix(free)
+    return ensuffix(free) if totm > 0.0 else '--'
 
 def fmta_tcnt(fi, info):
     '''Count number of CPUs requested for all jobs on node'''
@@ -787,6 +784,7 @@ def check_W_bool(name, default=False):
     return default
 
 clockre = re.compile(r'((\d+)\+)?(\d+):(\d+)(:(\d+))?$')
+__all__.append('clocktosecs')
 def clocktosecs(v):
     '''Convert clock time string to integer seconds
 
@@ -807,8 +805,6 @@ def clocktosecs(v):
     seconds = int(seconds) if seconds else 0
     return seconds + 60 * (minutes + 60 * (hours + 24 * days))
 
-__all__.append('clocktosecs')
-
 def decode_epoch_full(rawv):
     result = time.strftime('%c', time.localtime(int(rawv)))
     return result
@@ -823,6 +819,7 @@ def decode_resv_state_full(rawv):
             "RESV_DELETING_JOBS", "RESV_DEGRADED", "RESV_BEING_ALTERED",
             "RESV_IN_CONFLICT")[int(rawv)]
 
+__all__.append('ensuffix')
 def ensuffix(v, units=None):
     '''Scale a memory value
 
@@ -868,8 +865,7 @@ def ensuffix(v, units=None):
         return "0"
     return "%d%s" % (t, scale)
 
-__all__.append('ensuffix')
-
+__all__.append('format_resvs')
 def format_resvs(all_resvs, host, resv_list, now):
     '''Get reservations affecting a host
 
@@ -950,8 +946,6 @@ def format_resvs(all_resvs, host, resv_list, now):
         the_time = end
     return time.strftime(fmt, time.localtime(the_time))
 
-__all__.append('format_resvs')
-
 def safeint(x):
     '''Convert value to int, safely.
 
@@ -966,6 +960,7 @@ def safeint(x):
         t = 0
     return t
 
+__all__.append('secstoclock')
 def secstoclock(v, sf=False, df=False):
     '''Convert time in seconds for display
 
@@ -999,9 +994,8 @@ def secstoclock(v, sf=False, df=False):
     mm = dhm % 60
     return r'%s%s%02d:%02d%s' % (sign, daypfx, hh, mm, secsuf)
 
-__all__.append('secstoclock')
-
 sizere = re.compile(r'(-?)([\d.]+)([kmgtp]?)([bw]?)$')
+__all__.append('unsuffix')
 def unsuffix(v):
     '''Convert a memory size value based on suffix
 
@@ -1037,7 +1031,5 @@ def unsuffix(v):
     if neg == '-':
         value = 0.0 - value
     return value
-
-__all__.append('unsuffix')
 
 # vi:ts=4:sw=4:expandtab
