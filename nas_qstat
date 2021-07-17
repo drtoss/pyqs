@@ -927,6 +927,8 @@ def display_server_hdr(server, args, opts_W):
                 match = info
                 start = idx
         nrows = new_rows
+    # Give admin/user one last chance to tweak field values before layout
+    sysexit_last_chance_a(globals(), locals())
     # Layout result
     if len(nrows) > 0:
         rows = layout.layout(cfg, nrows)

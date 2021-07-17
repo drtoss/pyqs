@@ -190,7 +190,10 @@ def sysexit_add_fields(g, l):
 def sysexit_add_fields_a(g, l):
     pass
 
-def sysexit_interest(g, l, fi, info, ilist, clist):
+def sysexit_interest(g, l):
+    pass
+
+def sysexit_last_chance_a(g, l):
     pass
 
 def sysexit_set_server(g, l):
@@ -221,6 +224,6 @@ def stack_sysexit(old, ext):
     return wrapper
 
 # List of known sysexits, used as prefix to site/user supplied code.
-sysexits_header = 'global sysexit_post_opts,sysexit_add_fields,sysexit_add_fields_a,sysexit_interest,sysexit_set_server,sysexit_post_statresv\n'
+sysexits_header = 'global sysexit_post_opts,sysexit_add_fields,sysexit_add_fields_a,sysexit_interest,sysexit_last_chance_a,sysexit_set_server,sysexit_post_statresv\n'
 
 # vi:ts=4:sw=4:expandtab

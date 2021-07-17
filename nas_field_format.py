@@ -697,7 +697,7 @@ def fmta_info(fi, minfo):
         if r:
             interest.append(r)
     clist = [comment]
-    sysexit_interest(globals(), locals(), fi, minfo, interest, clist)
+    sysexit_interest(globals(), locals())
     comment = ' '.join(clist)
     if comment:
         interest.append(comment)
