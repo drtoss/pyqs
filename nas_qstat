@@ -1131,6 +1131,7 @@ def gen_field_list_a():
     fl.append(gen_field('mem', 'Mem', {'hj':'r'}, 'fmta_mem', 'resources_available', 'mem sum_mem'))
     fl.append(gen_field('mused', ['Mem', 'used'], {'hj':'r', 'hs':'/'}, 'fmta_mem', 'resources_assigned', 'mem sum_mem'))
     fl.append(gen_field('mfree', 'free', {'hj':'l', 'rj':'r'}, 'fmta_mfree', 'resources_available resources_assigned', 'mem sum_mem'))
+    fl.append(gen_field('state', 'State', None, 'fmt_by_name', 'state', 'const'))
     fl.append(gen_field('tasks', 'Tasks', {'hj':'r'}, 'fmta_tcnt', 'jobs', 'sum'))
     fl.append(gen_field('jobs', 'Jobs',{'hj':'r'}, 'fmta_jcnt', 'jobs', 'sum_jobs'))
     fl.append(gen_field('ninfo', 'Node Info', None, 'fmta_info', 'state comment resources_available partition queue resv', 'const'))
@@ -1572,8 +1573,10 @@ def summarize_nodes(flist, nlist):
             # only totals that can be reported accurately are 0 and 1
             fldval = str(total) if total <= 1 else ">1"
         elif 'sum_hosts' in opt:
+            t = [x[x.find('=')+1:] for x in opt if x.startswith('unit=')]
+            unit = 'host' if len(t) == 0 else t[0]
             hcount = len(nlist)
-            fldval = ' ' + str(hcount) + ' host' + ('s' if hcount != 1 else '')
+            fldval = ' ' + str(hcount) + ' ' + unit + ('s' if hcount != 1 else ' ')
         elif 'const' in opt:
             fldval = nlist[0][idx]
         else:
