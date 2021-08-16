@@ -24,7 +24,10 @@ def get_server(job_id):
         return (None, job_id[1:])
     server_out = None
     pbs_server_name = pbs_conf.pbs_server_name
-    (seq_num, parent_server, current_server, _, _) = parse_jobid(job_id)
+    t = parse_jobid(job_id)
+    if t == None:
+        return (None, None)
+    (seq_num, parent_server, current_server, _, _) = t
     if seq_num == None:
         return (None, None)
     if parent_server and not pbs_server_name:
@@ -88,6 +91,8 @@ def parse_jobid(job_id):
     if not mo:
         return None
     seq_num = mo.group('seq')
+    if resv_type:
+        seq_num = resv_type + seq_num
     parent = mo.group('parent')
     current = mo.group('current')
     array_idx = mo.group('idx')
