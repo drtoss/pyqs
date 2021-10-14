@@ -8,6 +8,7 @@ import sys
 
 pbs_conf = ifl.cvar.pbs_conf
 
+
 def get_server(job_id):
     '''Split job ID into its pieces
 
@@ -25,10 +26,10 @@ def get_server(job_id):
     server_out = None
     pbs_server_name = pbs_conf.pbs_server_name
     t = parse_jobid(job_id)
-    if t == None:
+    if t is None:
         return (None, None)
     (seq_num, parent_server, current_server, _, _) = t
-    if seq_num == None:
+    if seq_num is None:
         return (None, None)
     if parent_server and not pbs_server_name:
         pbs_server_name = parent_server
@@ -46,7 +47,7 @@ def get_server(job_id):
             try:
                 (hname, alias, ipaddr) = socket.gethostbyname_ex(parent_server)
                 parent_server = hname
-            except:
+            except socket.herror:
                 pass
             job_id_out = job_id_out + '.' + parent_server
             if not server_out:
@@ -57,12 +58,14 @@ def get_server(job_id):
     job_id_out = job_id_out + '.' + pbs_server_name
     return (job_id_out, server_out)
 
+
 patt = \
         r'((?P<seq>[0-9]+)(?P<idx>\[[0-9]*\])?)?' \
         r'(\.(?P<parent>[^\s@]+))?' \
         r'(@(?P<current>[^\s@]+))?' \
         r'$'
 comp = re.compile(patt)
+
 
 def parse_jobid(job_id):
     '''Split job ID into its pieces
@@ -75,7 +78,7 @@ def parse_jobid(job_id):
         (seq_num, parent_server, current_server, array_idx, resv_type) tuple
     Based on C routine by the same name in qstat.c
     '''
-    if job_id == None:
+    if job_id is None:
         return None
     job_id = job_id.strip()
     seq_num = None
@@ -97,7 +100,7 @@ def parse_jobid(job_id):
     current = mo.group('current')
     array_idx = mo.group('idx')
     # Cannot have array index on reservation
-    if resv_type != None and array_idx != None:
+    if resv_type is not None and array_idx is not None:
         return None
 
     return (seq_num, parent, current, array_idx, resv_type)
@@ -125,7 +128,7 @@ def file_to_stat(lines, attrs=[]):
                 item_list.append(item)
             item = None
             continue
-        if not '=' in line:
+        if '=' not in line:
             if item:    # Should not happen
                 item_list.append(item)
             # New item
@@ -137,7 +140,7 @@ def file_to_stat(lines, attrs=[]):
         flds = line.split('=', 1)
         if len(flds) != 2:
             print("Garbage input at line %d: %s" % (line_cnt, line),
-                file=sys.stderr)
+                  file=sys.stderr)
             continue
         key = flds[0].strip()
         if (attrset and key.split('.')[0] not in attrset):
@@ -153,16 +156,17 @@ def file_to_stat(lines, attrs=[]):
         item_list.append(item)
     return item_list
 
-def load_sysexits(prefix):
-    '''Load text of sysexit overrides
+
+def load_userexits(prefix):
+    '''Load text of userexit overrides
 
     Args:
-        prefix = prefix for sysexit file name
+        prefix = prefix for userexit file name
     Returns:
-        Catenation of all sysexit file contents
+        Catenation of all userexit file contents
     '''
     code = ''
-    # Load system sysexit, if present.
+    # Load system userexit, if present.
     pbs_exec = pbs_conf.pbs_exec_path
     t = os.environ.get('NAS_QSTAT_EXEC')
     if t:
@@ -175,11 +179,11 @@ def load_sysexits(prefix):
                     code += f.read()
         except OSError:
             pass
-    # Append any user's sysexit code
+    # Append any user's userexit code
     home = os.environ.get('HOME')
     if not home:
         home = os.path.expanduser('~')
-    if home != None:
+    if home is not None:
         path = os.path.join(home, '.%s_userexits' % prefix)
         try:
             if os.stat(path):
@@ -189,51 +193,70 @@ def load_sysexits(prefix):
             pass
     return code
 
-# Dummy sysexit routines that can be overridden by user/system
+# Dummy userexit routines that can be overridden by user/system
 
-def sysexit_post_opts(g, l):
+
+def userexit_post_opts(gbl, lcl):
     pass
 
-def sysexit_add_fields(g, l):
+
+def userexit_add_fields(gbl, lcl):
     pass
 
-def sysexit_add_fields_a(g, l):
+
+def userexit_add_fields_a(gbl, lcl):
     pass
 
-def sysexit_interest(g, l):
+
+def userexit_interest(gbl, lcl):
     pass
 
-def sysexit_last_chance_a(g, l):
+
+def userexit_last_chance_a(gbl, lcl):
     pass
 
-def sysexit_set_server(g, l):
+
+def userexit_set_server(gbl, lcl):
     pass
 
-def sysexit_post_statresv(g, l):
+
+def userexit_post_statresv(gbl, lcl):
     pass
 
-def stack_sysexit(old, ext):
-    '''Extend a sysexit routine
 
-    That is, given a sysexit routine foo and a new sysexit routine bar,
+def stack_userexit(old, ext):
+    '''Extend a userexit routine
+
+    That is, given a userexit routine foo and a new userexit routine bar,
     create a routine to replace foo that calls the old foo and then bar.
     E.g.:
-        def my_post_opts(g, l):
+        def my_post_opts(gbl, lcl):
             pass
-        sysexit_post_opts = stack_sysexit(sysexit_post_opts, my_post_opts)
+        userexit_post_opts = stack_userexit(userexit_post_opts, my_post_opts)
 
     Args:
-        old = existing sysexit to stack on
-        ext = new sysexit routine to extend the sysexit.
+        old = existing userexit to stack on
+        ext = new userexit routine to extend the userexit.
     Returns:
         Extended routine
     '''
-    def wrapper(g, l, orig=old, newer=ext):
-        orig(g, l)
-        newer(g, l)
+    def wrapper(gbl, lcl, orig=old, newer=ext):
+        orig(gbl, lcl)
+        newer(gbl, lcl)
     return wrapper
 
-# List of known sysexits, used as prefix to site/user supplied code.
-sysexits_header = 'global sysexit_post_opts,sysexit_add_fields,sysexit_add_fields_a,sysexit_interest,sysexit_last_chance_a,sysexit_set_server,sysexit_post_statresv\n'
+
+# List of known userexits, used as prefix to site/user supplied code.
+userexits_header = 'global %s\n' % ','.join(
+    [
+        'userexit_post_opts',
+        'userexit_add_fields',
+        'userexit_add_fields_a',
+        'userexit_interest',
+        'userexit_last_chance_a',
+        'userexit_set_server',
+        'userexit_post_statresv'
+    ]
+    )
 
 # vi:ts=4:sw=4:expandtab

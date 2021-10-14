@@ -314,7 +314,7 @@ Normally returns 0. Returns 1 on errors (e.g., nonexistent queue or jobid).
 .TP
 .B HOME
 Used to locate user's
-.I .qstat_sysexits
+.I .qstat_userexits
 file.
 If not set, the password database is consulted for the user's home directory.
 
@@ -326,23 +326,23 @@ file is consulted (usually
 
 .SH FILES
 .TP
-PBS_EXEC/lib/site/qstat_sysexits
+PBS_EXEC/lib/site/qstat_userexits
 Administrator provided python code to provide default values and
-sysexits. See
-.B SYSEXITS
+userexits. See
+.B USEREXITS
 section.
 .TP
 PBS_EXEC/bin/pbs_python
 Python interpreter that runs
 .BR nas_qstat .
 .TP
-$HOME/.qstat_sysexits
-User supplied python code to provide default values and sysexits.
+$HOME/.qstat_userexits
+User supplied python code to provide default values and userexits.
 See
-.B SYSEXITS
+.B USEREXITS
 section.
 
-.SH SYSEXITS
+.SH USEREXITS
 .B nas_qstat
 invokes three administrator- or user- supplied routines at specific
 points during its execution.
@@ -367,10 +367,10 @@ methods.
 The first place searched is
 .IR PBS_EXEC/lib/site/ ,
 where the file
-.I qstat_sysexits
+.I qstat_userexits
 is read, if it exists.
 The second search location is
-.IR $HOME/.qstat_sysexits ,
+.IR $HOME/.qstat_userexits ,
 which is also read, if it exists.
 .sp
 The contents of these files are catenated and passed to
@@ -400,22 +400,22 @@ specified on command line.
 .B default_fields
 A list with the names of default fields. This list can be
 edited directly, although it is preferred to make changes using the
-.B sysexit_post_opt
+.B userexit_post_opt
 routine.
 .TP
-.B stack_sysexit(old, new)
+.B stack_userexit(old, new)
 Routine that creates a new routine that calls the
 .B old
-sysexit routine and
+userexit routine and
 then the
 .B new
 one.
-The primary use is in the user's sysexit script to call the site's
-version of that sysexit and then call the user's version.
+The primary use is in the user's userexit script to call the site's
+version of that userexit and then call the user's version.
 .RE
 
 .TP
-.B "sysexit_post_opts(g, l)"
+.B "userexit_post_opts(g, l)"
 Called immediately after the snippets are loaded and before
 .B -W
 options are examined to adjust formatting. This is where you might change
@@ -432,7 +432,7 @@ See the example below.
 .RE
 
 .TP
-.B "sysexit_add_fields(g, l)"
+.B "userexit_add_fields(g, l)"
 Called after the layout formatter has been created, but before the formatting
 options from
 .B -W
@@ -440,18 +440,18 @@ options have been examined.
 Its purpose is to allow the site/user to define a new field and how to
 format that field.
 Surprisingly perhaps, even though
-.B sysexit_add_fields
+.B userexit_add_fields
 is called after
-.BR sysexit_post_opts ,
+.BR userexit_post_opts ,
 the latter can include fmt_xxx options that affect how the new field(s)
 are displayed.
 
 .TP
-.B "sysexit_set_server(g, l)"
+.B "userexit_set_server(g, l)"
 When displaying job status, this is called after information about the
 server has been fetched, but before anything is displayed.
 If multiple servers are specified among the command line destinations,
-.B sysexit_set_server
+.B userexit_set_server
 is called for each server.
 When called, interesting variables are:
 .RS
@@ -480,13 +480,13 @@ If you change the title via
 then you must use "new_title" in the call to
 .BR change_fieldspec .
 .PP
-The intended purpose of this sysexit is to enable or suppress fields from
+The intended purpose of this userexit is to enable or suppress fields from
 the output.
-Note that this cannot be done by one of the earlier sysexits because
-the actual server used is not known when those sysexits run.
+Note that this cannot be done by one of the earlier userexits because
+the actual server used is not known when those userexits run.
 (On the other hand, if the site has only one server, then it is more efficient
 to add or remove fields using
-.IR sysexit_post_opt .)
+.IR userexit_post_opt .)
 Further note that this routine is called too late to add or remove fields.
 Instead, you can suppress undesired fields or unsuppress fields that
 are normally not displayed.
@@ -496,7 +496,7 @@ field specification to
 .BR False .
 .sp
 .RE
-See the EXAMPLE SYSEXITS section for typical uses.
+See the EXAMPLE USEREXITS section for typical uses.
 .SH EXAMPLES
 .sp
 Show running jobs.
@@ -571,9 +571,9 @@ JobID      User     Queue Jobname TSK Nds wallt S  wallt Eff
 22.server2 dtalcott playq STDIN     1   1 00:33 Q 265:30  --
 8.server2  dtalcott playq STDIN     1   1 00:03 H  00:00  --
 .EE
-.SH EXAMPLE SYSEXITS
+.SH EXAMPLE USEREXITS
 This example shows a
-.I qstat_sysexits
+.I qstat_userexits
 file that a site might install in
 .I PBS_EXEC/lib/site
 to enable NAS options,
@@ -610,7 +610,7 @@ else:
     def site_post_opts(g, l):
         l['default_W'].extend(['node_detail', 'model'])
 
-    sysexit_post_opts = stack_sysexit(sysexit_post_opts, site_post_opts)
+    userexit_post_opts = stack_userexit(userexit_post_opts, site_post_opts)
 
     # Set up routine to tweak outputs based on server
     def site_set_server(g, l):
@@ -630,12 +630,12 @@ else:
             else:
                 cfg.change_fieldspec('GPUs', suppress=True)
 
-    sysexit_set_server = stack_sysexit(sysexit_set_server, site_set_server)
+    userexit_set_server = stack_userexit(userexit_set_server, site_set_server)
 
 .EE
 .PP
 The next example shows what a user might put in their
-.I $HOME/.qstat_sysexits
+.I $HOME/.qstat_userexits
 file.
 This example limits the jobname field to 20 characters and uses "..."
 to indicate parts of the name have been elided.
@@ -659,7 +659,7 @@ else:
         l['default_W'].extend(['fmt_jobname=maxw:20 hj:e rt:...'])
         # Use human readable durations
         l['default_W'].extend(['human'])
-    sysexit_post_opts = stack_sysexit(sysexit_post_opts, my_post)
+    userexit_post_opts = stack_userexit(userexit_post_opts, my_post)
 
     def my_server(g, l):
         svr_hdr = l.get('in_server_header', False)
@@ -667,7 +667,7 @@ else:
             cfg = l['cfg']
             cfg.change_fieldspec('Node Info', maxw=40)
 
-    sysexit_set_server = stack_sysexit(sysexit_set_server, my_server)
+    userexit_set_server = stack_userexit(userexit_set_server, my_server)
 
 .EE
 .sp

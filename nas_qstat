@@ -113,19 +113,19 @@ def main():
     do_jobs = False
     if args.Q:
         default_fields = ['q_name', 'q_ncpus', 'q_ncpus_def', 'q_time', 'q_time_def', 'q_jm', 'state_count', 'q_pr', 'q_info']
-        kf = gen_field_list_Q()
+        known_fields = gen_field_list_Q()
     elif args.B:
         default_fields = ['server_name', 'jm', 'state_count', 'default_queue', 'info']
-        kf = gen_field_list_B()
+        known_fields = gen_field_list_B()
     else:
         do_jobs = True
         default_fields = ['jobid', 'user', 'queue', 'jobname', 'cpus', 'nds',
             'reqdwallt', 's', 'elapwallt', 'eff']
-        kf = gen_field_list()
+        known_fields = gen_field_list()
         if args.verbose > 2:
             # Show titles of known fields
             l = []
-            for x in kf:
+            for x in known_fields:
                 t = x['title']
                 l.append(t if isinstance(t, str) else ' '.join(t))
             print('Known field titles', ', '.join(l))
@@ -141,19 +141,19 @@ def main():
     ghostname = socket.gethostname()
     ghostnameshort = ghostname.split('.')[0]
     # Load possible user or system overrides
-    more_code = load_sysexits('qstat')
+    more_code = load_userexits('qstat')
     if more_code:
-        more_code = sysexits_header + more_code
+        more_code = userexits_header + more_code
         if args.verbose > 2:
             print(more_code)
-        prog = compile(more_code, 'sysexit code', 'exec')
+        prog = compile(more_code, 'userexit code', 'exec')
         exec(prog, globals(), locals())
     default_W = []
-    sysexit_post_opts(globals(), locals())
+    userexit_post_opts(globals(), locals())
     opts_W[0:0] = default_W
     fmtr = NAS_field_format(default_fields, verbose, opts_W)
-    fmtr.known_fields = kf
-    sysexit_add_fields(globals(), locals())
+    fmtr.known_fields = known_fields
+    userexit_add_fields(globals(), locals())
     # Handle -W options
     # First, collect list of fields of interest and which PBS attributes
     # hold the values for those fields
@@ -366,8 +366,8 @@ def display_jobs(args, fmtr):
             extract_share_info(current_server)
             extract_job_info(current_server)
         set_entity_map(gshare_entity_info)
-        # Give sysexits a chance to adjust things based on server
-        sysexit_set_server(globals(), locals())
+        # Give userexits a chance to adjust things based on server
+        userexit_set_server(globals(), locals())
         # Display server header, if requested
         if alt_disp:
             cache_server(current_server, conn)
@@ -849,14 +849,14 @@ def display_server_hdr(server, args, opts_W):
         print("\t+++ Scheduling turned off.")
     # Display info about MoMs
     all_resvs = info.get('resv_info',())
-    fmta_init(gNAS, opts_W, all_resvs, sysexit_interest, gNow)
+    fmta_init(gNAS, opts_W, all_resvs, userexit_interest, gNow)
     node_detail = check_W_bool('node_detail')
     default_fields = ['host', 'cpus', 'gpus', 'tasks', 'jobs', 'ninfo']
     if node_detail:
         default_fields = ['host', 'cused', 'cfree', 'gused', 'gfree', 'mused', 'mfree', 'tasks', 'jobs', 'ninfo']
     fmtr = NAS_field_format(default_fields, verbose, opts_W, 'fmta')
     fmtr.known_fields = gen_field_list_a()
-    sysexit_add_fields_a(globals(), locals())
+    userexit_add_fields_a(globals(), locals())
     (field_list, attr_list, errs) = fmtr.collect_fields('oa')
     if (errs):
         # Check if should just print list of fields
@@ -898,7 +898,7 @@ def display_server_hdr(server, args, opts_W):
             mom_row.append(func(f, minfo))
         mom_list.append(mom_row)
     in_server_header = True
-    sysexit_set_server(globals(), locals())
+    userexit_set_server(globals(), locals())
     # Handle summarizing
     nrows = mom_list
     t = check_W_int('node_bin_total', 10)
@@ -928,7 +928,7 @@ def display_server_hdr(server, args, opts_W):
                 start = idx
         nrows = new_rows
     # Give admin/user one last chance to tweak field values before layout
-    sysexit_last_chance_a(globals(), locals())
+    userexit_last_chance_a(globals(), locals())
     # Layout result
     if len(nrows) > 0:
         rows = layout.layout(cfg, nrows)

@@ -587,14 +587,14 @@ def fmta_init(g, o, r, s, n):
         g = Value for gnas
         o = opts_W
         r = reservation list
-        s = sysexit function to tweak interesting list
+        s = userexit function to tweak interesting list
         n = current time (now)
     '''
-    global gnas, optsw, allresvs, sysexit_interest, gnow
+    global gnas, optsw, allresvs, userexit_interest, gnow
     gnas = g
     optsw = o
     allresvs = r
-    sysexit_interest = s
+    userexit_interest = s
     gnow = n
 
 def geta_from_rsrc(fi, info):
@@ -698,7 +698,7 @@ def fmta_info(fi, minfo):
         if r:
             interest.append(r)
     clist = [comment]
-    sysexit_interest(globals(), locals())
+    userexit_interest(globals(), locals())
     comment = ' '.join(clist)
     if comment:
         interest.append(comment)
