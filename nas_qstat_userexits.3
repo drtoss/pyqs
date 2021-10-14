@@ -1,0 +1,251 @@
+.TH NAS_QSTAT_USEREXITS 3 "2020-05-04" Local "OpenPBS contributions"
+.SH NAME
+.B nas_qstat_userexits
+\- customize nas_qstat or nas_rstat output
+.SH SYNOPSIS
+.B userexit_add_fields(g, l)
+.br
+.B userexit_add_fields_a(g, l)
+.br
+.B userexit_interest(g, l)
+.br
+.B userexit_last_chance_a(g, l)
+.br
+.B userexit_set_server(g, l)
+.br
+.B userexit_post_opts(g, l)
+.br
+.B userexit_post_statresv(g, l)
+
+.SH DESCRIPTION
+After
+.B nas_qstat
+or
+.B nas_rstat
+have parsed their command line arguments, they read and execute any
+"userexit" files present
+(see their respective man pages for the file locations).
+These files are expected to redefine default empty python procedures that
+are called at specific times during command execution.
+The redefined procedures typically provide site- or user-specific
+default values for command line options.
+They can also implement new fields for display by the command.
+.PP
+When the userexit files are executed, the following python items are
+available:
+.TP
+.B args
+The command line arguments as returned by
+.BR argparse .
+For most cases, this should be treated as read-only.
+The particular arguments of most interest with
+.B nas_qstat
+are
+.B args.B
+and
+.BR args.Q ,
+which are used to decide whether
+.B nas_qstat
+is displaying servers, queues, or jobs.
+This might affect which versions of the userexit routines get defined.
+.TP
+.B gdebug
+The value of the
+.B \-\-debug
+command line argument.
+.TP
+.B verbose
+The (integer) value of the
+.B \-\-verbose
+command line argument.
+.TP
+.B stack_userexit(old, new)
+Function that creates a procedure that calls an existing userexit and
+then calls a new version of the userexit.
+The typical use is for a user-defined userexit that wants to include
+the changes provided by the site-defined version of the same userexit.
+See
+.B EXAMPLES
+section for use.
+
+.PP
+The individual userexits are called with two arguments,
+.B g
+and
+.B l
+which are the global and local symbol tables (resp.) at the point where
+the userexit is being called.
+Interesting global and local symbols are pointed out in the descriptions
+of the various userexits below.
+
+.TP
+.B userexit_add_fields(g, l)
+This routine adds new field names and the functions that define how
+they are computed.
+It is called once, after
+.B userexit_post_opts
+and after a formatter object has been created.
+The use of
+.B userexit_add_fields
+is complicated, but see the
+.B EXAMPLES
+section for help.
+
+Interesting symbols are:
+.RS
+.TP
+.B nas_field_format
+Module whose attributes are the functions that compute field values.
+By convention the names of functions for job attributes begin with
+"fmt_" and for nodes in the
+.B \-a
+output begin with "fmta_".
+To create a new field, you define a function that is called with
+the field_info dictionary for the field and a dictionary with 
+information about the object (job, host, etc) of interest.
+The function returns the string representation of the field for
+that object.
+.TP
+.B "gen_field(name, title, form, func, source, opt)"
+Function that creates a field_info dictionary suitable for adding to
+the formatter object.
+.TP
+.B l['fmtr']
+The created formatter object.
+After you define a formatting function, you create a field_info dictionary
+for it and append the result to
+.B fmtr
+to make it available for displaying the field.
+.RE
+
+.TP
+.B userexit_add_fields_a(g, l)
+Similar to
+.B userexit_add_fields
+except that fields are added to the
+.B nas_qstat \-a
+output, rather than normal job, server, or queue output.
+
+.TP
+.B userexit_interest(g, l)
+The
+.B nas_qstat \-a
+output normally includes a field titled
+.I Node Info
+that includes miscellaneous information about a node (e.g., state,
+queue, comment).
+Sites or users who want to tweak what shows up there can use this routine,
+which is called for each node.
+
+Interesting symbols are:
+.RS
+.TP
+.B l['minfo']
+The attribute dictionary for the MoM being examined.
+.TP
+.B g['gnow']
+The current epoch time when
+.B nas_qstat
+started.
+.TP
+.B l['interest']
+The list of "interesting" items found so far.
+Each item is a string.
+The userexit can add, remove, or modify entries in this list.
+The final list, plus
+.BR clist ,
+described next,
+is joined to form the field value.
+.TP
+.B l['clist']
+A list, initially containing just the comment attribute of the node,
+slightly edited to remove redundant information.
+The userexit can add, remove, or modify entries in this list.
+The final list, if not empty, is joined and appended to the
+.B interest
+list.
+.RE
+
+.TP
+.B userexit_last_chance_a(g, l)
+Routine called immediately before calling
+.B layout
+to format
+.B nas_qstat \-a
+output.
+This userexit can be used to tweak bulk field values.
+Its primary purpose is to clean up the "Node Info" values which might
+have been tweaked to affect the sorting and summarizing of nodes.
+
+Interesting symbols are:
+.RS
+.TP
+.B l['nrows']
+The ordered list of lists of field values for nodes.
+Each node or summarized collection of nodes has an entry in
+.BR nrows .
+The entry is a list of formatted values for the selected fields, in the
+order the fields should appear on the output.
+The userexit can edit any part of this list of lists, but the final
+field lists must all have exactly the same number of elements as there
+were on entry.
+
+.TP
+.B l['ninfo_idx']
+If the
+.B Node Info
+field is selected to be output, the index of that field in a node
+info row in
+.B nrows
+is given by
+.BR ninfo_idx .
+If
+.B ninfo_idx
+is None or -1, then the node info field is not present.
+.RE
+
+.TP
+.B userexit_set_server(g, l)
+Called in two different contexts when
+.B nas_qstat
+is displaying job info.
+It is first called once
+.B nas_qstat
+determines which server is the next one whose jobs are of interest, but
+before the job info is actually requested.
+It is next called if
+.B \-a
+output is requested and after vnode info for the server is collected.
+.PP
+.B userexit_set_server
+is often used to enable/disable fields in the output based on whether
+those fields apply to specific servers.
+Due to a limitation in
+.BR nas_qstat ,
+.B userexit_set_server
+cannot add or remove fields based on the server.
+(The formatter object is already defined and configured.)
+Instead, you can add the fields always, but suppress them from the output
+on servers where they don't apply.
+See the
+.B EXAMPLES
+section.
+.PP
+Symbols of interest:
+TODO
+.RS
+
+.TP
+.B userexit_post_opts(g, l)
+TODO
+
+.TP
+.B userexit_post_statresv(g, l)
+TODO
+
+.SH ERRORS
+
+.SH NOTES
+
+.SH EXAMPLES
+

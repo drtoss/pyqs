@@ -1,0 +1,46 @@
+# Enable NAS-specific features
+globals()['gNAS'] = True
+
+# Possibly do different things based on whether we are statusing hosts,
+# queues, or jobs
+if args.B:
+    pass
+elif args.Q:
+    pass
+else:
+    # We add ngpus to default field list, if not already there
+    if 'gpus' not in default_fields:
+        try:
+            t = default_fields.index('cpus')
+        except:
+            t = len(default_fields) - 1
+        default_fields.insert(t+1, 'gpus')
+
+    # Set up routine to set default -W values
+    def site_post_opts(gbl, lcl):
+        lcl['default_W'].extend(['node_detail', 'model'])
+        lcl['default_W'].extend(['fmt_jobname=maxw:20 hj:e ht:...'])
+        if gbl['ghostnameshort'] in ['pbspl4', 'server2']:
+            lcl['default_W'].extend(['condense_vnodes'])
+
+    sysexit_post_opts = stack_sysexit(sysexit_post_opts, site_post_opts)
+
+    # Set up routine to tweak outputs based on server
+    def site_set_server(g, lcl):
+        server_name = lcl['current_server'].split('.')[0]
+        cfg = lcl['cfg']
+        svr_hdr = lcl.get('in_server_header', False)
+        supgpu = not server_name in ['pbspl4', 'server2']
+        if svr_hdr:
+            # Enable/disable all GPU fields in -a node output
+            node_detail = lcl.get('node_detail', False)
+            cfg.change_fieldspec('gpus', suppress=supgpu or node_detail)
+            cfg.change_fieldspec('gused', suppress=supgpu or not node_detail)
+            cfg.change_fieldspec('gfree', suppress=supgpu or not node_detail)
+        else:
+            # Enable/disable job GPU column
+            cfg.change_fieldspec('gpus', suppress=supgpu)
+
+    sysexit_set_server = stack_sysexit(sysexit_set_server, site_set_server)
+
+# vi:ts=4:sw=4:expandtab:syntax=python
