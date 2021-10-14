@@ -80,7 +80,7 @@ def main():
         help='Options customizing field selection and display.')
     parser.add_argument('-a', default=False, action='store_true',
         help='Include information about server and compute resources')
-    parser.add_argument('--debug', default='',
+    parser.add_argument('--debug', default=[], action='append',
         help='Debugging arguments (for developers)')
     parser.add_argument('-i', default=False, action='store_true',
         help='Select queued, held, or waiting jobs')
@@ -103,7 +103,7 @@ def main():
 
     args = parser.parse_args()
     verbose = args.verbose
-    gdebug = args.debug
+    gdebug = ' '.join(args.debug)
 
     if (ifl.pbs_loadconf(0) == 0):
         print("Cannot get PBS configuration information", file=sys.stderr)
@@ -605,7 +605,7 @@ def display_queues(args, fmtr):
         row = list()
         for f in fmtr.field_list:
             func = getattr(nas_field_format, f['func'])
-            row.append(func(f, svr, opts_W))
+            row.append(func(f, svr))
         rows.append(row)
     if rows:
         new_section()
@@ -684,7 +684,7 @@ def display_servers(args, fmtr):
         row = list()
         for f in fmtr.field_list:
             func = getattr(nas_field_format, f['func'])
-            row.append(func(f, svr, opts_W))
+            row.append(func(f, svr))
         rows.append(row)
     if rows:
         new_section()
@@ -1310,7 +1310,7 @@ def condense_vnode_info(nodes):
     nat_name = None
     oddballs = list()
     new_list = list()
-    ignore_states = set(['free'])
+    ignore_states = set(['free','job-exclusive','job-busy'])
     for ninfo in sorted(nodes, key=cmpf):
         cur_name = ninfo.get('Mom','').split('.')[0]
         if cur_name != nat_name:
@@ -1346,10 +1346,12 @@ def condense_vnode_info(nodes):
         for a in ['resources_available', 'resources_assigned']:
             for r in ['mem', 'vmem']:
                 z = a+'.'+r
-                nat_info[z] = safemem(nat_info.get(z,0.0)) + safemem(ninfo.get(z,0.0))
+                t = safemem(nat_info.get(z,0.0)) + safemem(ninfo.get(z,0.0))
+                nat_info[z] = ensuffix(t, 'K')
             for r in ['ncpus', 'ngpus']:
                 z = a+'.'+r
-                nat_info[z] = safeint(nat_info.get(z,0)) + safeint(ninfo.get(z,0))
+                t = safeint(nat_info.get(z,0)) + safeint(ninfo.get(z,0))
+                nat_info[z] = str(t)
         # End of condensing
     if nat_info:
         new_list.append(nat_info)

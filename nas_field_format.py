@@ -276,12 +276,12 @@ def fmt_aoe(fi, info):
         return mo.group(1)
     return '--'
 
+subst_white_space = str.maketrans(' \t\n\r', '____')
 def fmt_comment(fi, info):
     rawv = fmt_by_attr(fi, info)
     if gropt or rawv == '--':
         return rawv
-    t = str.maketrans(' \t\n\r', '____')
-    return rawv.translate(t)
+    return rawv.translate(subst_white_space)
 
 def fmt_date(fi, info):
     rawv = fmt_by_attr(fi, info)
@@ -668,7 +668,8 @@ def fmta_info(fi, minfo):
             is_down = True
         elif ss == 'offline':
             is_offline = True
-        elif ss in ['Stale', 'state-unknown', 'free', '<various>']:
+        # Not sure whether 'Stale' should be included in this list
+        elif ss in ['state-unknown', 'free', '<various>']:
             pass
         else:
             new_states.append(ss)

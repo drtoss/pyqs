@@ -102,7 +102,7 @@ def parse_jobid(job_id):
 
     return (seq_num, parent, current, array_idx, resv_type)
 
-def file_to_stat(lines):
+def file_to_stat(lines, attrs=[]):
     '''Convert file contents to PBS statXXX result
 
     E.g., You might take the output from pbsnodes -av and convert it
@@ -110,12 +110,14 @@ def file_to_stat(lines):
 
     Args:
         lines = Contents of file
+        attrs = Names of interesting attributes
     Returns:
         List of dicts with attribute/value pairs
     '''
     item_list = []
     item = None
     line_cnt = 0
+    attrset = set(attrs)
     for line in lines.split('\n'):
         line_cnt += 1
         if line == '':
@@ -137,13 +139,16 @@ def file_to_stat(lines):
             print("Garbage input at line %d: %s" % (line_cnt, line),
                 file=sys.stderr)
             continue
+        key = flds[0].strip()
+        if (attrset and key.split('.')[0] not in attrset):
+            continue
+        value = flds[1].strip()
         # Hack to recognize epoch + timestamp and convert to just epoch
         # E.g., 1624104854 (Sat Jun 19 05:14:14 PDT 2021)
-        value = flds[1].strip()
         mo = re.match(r'(\d{9,15}) \(', value)
         if mo:
             value = mo.group(1)
-        item[flds[0].strip()] = value
+        item[key] = value
     if item:
         item_list.append(item)
     return item_list
@@ -163,7 +168,7 @@ def load_sysexits(prefix):
     if t:
         pbs_exec = t
     if pbs_exec:
-        path = os.path.join(pbs_exec, 'lib', 'site', '%s_sysexits' % prefix)
+        path = os.path.join(pbs_exec, 'lib', 'site', '%s_userexits' % prefix)
         try:
             if os.stat(path):
                 with open(path) as f:
@@ -175,7 +180,7 @@ def load_sysexits(prefix):
     if not home:
         home = os.path.expanduser('~')
     if home != None:
-        path = os.path.join(home, '.%s_sysexits' % prefix)
+        path = os.path.join(home, '.%s_userexits' % prefix)
         try:
             if os.stat(path):
                 with open(path) as f:
