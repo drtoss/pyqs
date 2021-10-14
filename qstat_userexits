@@ -23,7 +23,7 @@ else:
         if gbl['ghostnameshort'] in ['pbspl4', 'server2']:
             lcl['default_W'].extend(['condense_vnodes'])
 
-    sysexit_post_opts = stack_sysexit(sysexit_post_opts, site_post_opts)
+    userexit_post_opts = stack_userexit(userexit_post_opts, site_post_opts)
 
     # Set up routine to tweak outputs based on server
     def site_set_server(g, lcl):
@@ -41,6 +41,6 @@ else:
             # Enable/disable job GPU column
             cfg.change_fieldspec('gpus', suppress=supgpu)
 
-    sysexit_set_server = stack_sysexit(sysexit_set_server, site_set_server)
+    userexit_set_server = stack_userexit(userexit_set_server, site_set_server)
 
 # vi:ts=4:sw=4:expandtab:syntax=python
