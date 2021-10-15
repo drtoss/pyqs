@@ -136,6 +136,7 @@ def main():
     opts_W = args.W
     if opts_W is None:
         opts_W = list()
+    conf.opts_W = opts_W
     conf.gNAS = gNAS = check_W_bool('NAS')
     # Make units for sizes available in opt_W
     opts_W.insert(0,args.size_units)
@@ -143,7 +144,6 @@ def main():
     conf.ghostname = ghostname = socket.gethostname()
     conf.ghostnameshort = ghostnameshort = ghostname.split('.')[0]
     # Load possible user or system overrides
-    conf.opts_W = opts_W
     more_code = load_userexits('qstat')
     if more_code:
         more_code = userexits_header + more_code
