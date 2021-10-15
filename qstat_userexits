@@ -1,4 +1,5 @@
 # Enable NAS-specific features
+import nas_xstat_config as conf
 globals()['gNAS'] = True
 
 # Possibly do different things based on whether we are statusing hosts,

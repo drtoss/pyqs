@@ -6,6 +6,8 @@ import os
 import socket
 import sys
 
+import nas_xstat_config as conf
+
 pbs_conf = ifl.cvar.pbs_conf
 
 
@@ -105,11 +107,47 @@ def parse_jobid(job_id):
 
     return (seq_num, parent, current, array_idx, resv_type)
 
-def file_to_stat(lines, attrs=[]):
-    '''Convert file contents to PBS statXXX result
+def file_to_stat(host, stat, attrs=[]):
+    '''Load faked PBS statXXX results from file
+
+    That is, check if one of the --debug arguments specified a file
+    to use in place of an actual pbs_statxyz call. Load the file
+    if so.
 
     E.g., You might take the output from pbsnodes -av and convert it
     to look like the result from a pbs_statvnodes() call.
+
+    Args:
+        host = Hostname of faked data of interest
+        stat = Which kind of info is being queried (e.g., jobs)
+        attrs = List of interesting attribute names. Can also
+            be the attropl that would be passed to the pbs_xyz call.
+    Returns:
+        None if there isn't any appropriate fake file specified.
+        Else a dictionary with the attributes and values.
+    '''
+    mo = re.search(f'fake_{stat}_{host}=([^\s]+)', conf.gdebug)
+    if not mo:
+        return None
+    fname = mo.group(1)
+    # Convert attropl to simple list if necessary
+    lst = None
+    if isinstance(attrs, ifl.attropl) or isinstance(attrs, ifl.attrl):
+        lst = []
+        cur = attrs
+        while cur:
+            key = cur.name
+            if cur.resource:
+                key = key + '.' + cur.resource
+            lst.append(key)
+            cur = cur.next
+    with open(fname) as fd:
+        lines = fd.read()
+        bs = lines_to_stat(lines, attrs if lst is None else lst)
+    return bs
+
+def lines_to_stat(lines, attrs=[]):
+    '''Convert file contents to PBS statXXX result
 
     Args:
         lines = Contents of file

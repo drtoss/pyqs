@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 '''
 Module that encapsulates all the information needed by layout routines
 to format columnar fields.
@@ -14,30 +13,28 @@ import re
 import time
 import math
 
+import nas_xstat_config as conf
+
 __all__ = list()
 
 __all__.append('NAS_field_format')
 class NAS_field_format(object):
 
-  def __init__(self, default_fields, verbose = False, opts_W = None, pfx = None):
+  def __init__(self, default_fields, pfx = None):
     ''' Create new display formatter
 
     The arguments are saved away for later use.
 
     Args:
         default_fields = List of names of default fields
-        verbose = boolean to enable extra debugging output
-        opts_W = List of -W command line arguments that affect formatting
         pfx = prefix for opts_W arguments of interest, default "fmt_"
     '''
     self.default_fields = default_fields
-    self.verbose = verbose
-    self.W = opts_W
     self.pfx = pfx if pfx else 'fmt'
     self.known_fields = []
     self.field_list = []
 
-  def adjust_formats(self, fl, optW=None):
+  def adjust_formats(self, fl):
     '''Adjust layout options for fields
 
     Take a list of field_info dictionaries and modify the layout parameters
@@ -46,7 +43,6 @@ class NAS_field_format(object):
 
     Args:
         fl = list of field_info data
-        optW = list of -W options, default is W instance var
     Returns: True if no errors, else error messages
     '''
 
@@ -57,10 +53,8 @@ class NAS_field_format(object):
             'maxw', 'minw',
             'rf', 'rj', 'rs', 'rt', 'suppress'
             )
-    if optW == None:
-        optW = self.W
     opt_re = re.compile(self.pfx + r'_(\w+)=(.+)')
-    for wopt in optW:
+    for wopt in conf.opts_W:
         # Is it our kind of W option?
         mo = opt_re.match(wopt)
         if not mo:
@@ -139,7 +133,7 @@ L           fl = list of field_info dictionaries describing field selected
             msg = Text of any errors, None if no errors
     '''
     fl = self.default_fields
-    W = self.W
+    W = conf.opts_W
     errlist = []
     if W is None:
         W = []
@@ -181,7 +175,7 @@ L           fl = list of field_info dictionaries describing field selected
         if t:
             alist.extend(t)
     aset = set(alist)
-    if self.verbose:
+    if conf.verbose:
         print("Need these attributes: %s" % ', '.join(sorted(aset)))
     return (fil, aset, '\n'.join(errlist) if errlist else None)
 
@@ -580,24 +574,18 @@ def fmt_user(fi, info):
     return rawv.split('@')[0]
 
 __all__.append('fmta_init')
-def fmta_init(g, o, r, s, n):
+def fmta_init(r, s):
     '''Save away values that might be needed by -a formatters
 
     Args:
-        g = Value for gnas
-        o = opts_W
         r = reservation list
         s = userexit function to tweak interesting list
-        n = current time (now)
     '''
-    global gnas, optsw, allresvs, userexit_interest, gnow
-    gnas = g
-    optsw = o
+    global allresvs, userexit_interest
     allresvs = r
     userexit_interest = s
-    gnow = n
 
-def geta_from_rsrc(fi, info):
+def geta_from_rsrc(fi, info, missing=None):
     '''Get MoM resource value from info'''
     r = fi['sources']
     a = fi['opt'][0]
@@ -608,6 +596,8 @@ def geta_from_rsrc(fi, info):
         rawv = info.get(x + '.' + a)
         if rawv != None:
             result.append(rawv)
+        else:
+            result.append(missing)
     return result
 
 def fmta_count(fi, info):
@@ -634,7 +624,7 @@ def fmta_host(fi, info):
 
 def fmta_info(fi, minfo):
     '''Format interesting info about MoM'''
-    global gnas, optsw, allresvs, gnow
+    global allresvs
     mom_name = minfo.get('id', '??')
     comment = minfo.get('comment', '')
     partition = minfo.get('partition', '')
@@ -648,7 +638,7 @@ def fmta_info(fi, minfo):
     if partition != '':
         interest.append('p=' + partition)
     # Some NAS only items
-    if gnas and check_W_bool('model'):
+    if conf.gNAS and check_W_bool('model'):
         t = minfo.get('resources_available.bigmem')
         if t == 'True':
             interest[0:0] = ['bigmem']
@@ -685,7 +675,7 @@ def fmta_info(fi, minfo):
     if is_down:
         comment = comment.replace('node down: communication closed','')
     # Remove offline timestamps added by NAS
-    if gnas:
+    if conf.gNAS:
         while True:
             mo = re.search(r'\d\d\d\d-\d\d-\d\d \d\d:\d\d', comment)
             if mo:
@@ -694,7 +684,7 @@ def fmta_info(fi, minfo):
                 break
     # Check for reservations for node
     if resvs and resvs[0] != '':
-        r = format_resvs(allresvs, mom_name, resvs, gnow)
+        r = format_resvs(allresvs, mom_name, resvs, conf.gNow)
         if r:
             interest.append(r)
     clist = [comment]
@@ -749,7 +739,7 @@ def fmta_tcnt(fi, info):
 
 def fmta_used(fi, info):
     '''Assigned countable resource'''
-    v = geta_from_rsrc(fi, info)
+    v = geta_from_rsrc(fi, info, '0')
     if v:
         return v[0]
     return '0'
@@ -766,11 +756,10 @@ def check_W_bool(name, default=False):
         True if option present in opts_W and not set false
         default otherwise
     '''
-    global optsw
     namee = name + '='
     # Last match decides, so search backward
-    for idx in range(len(optsw)-1, -1, -1):
-        wopt = optsw[idx]
+    for idx in range(len(conf.opts_W)-1, -1, -1):
+        wopt = conf.opts_W[idx]
         # Option by itself is True
         if wopt == name:
             return True

@@ -35,7 +35,7 @@ args = None
 gNAS = False
 gNAS_job_data = {}
 gNow = time.time()
-gdebug = ''
+gdebug = []
 ghostname = ''
 ghostnameshort = ''
 gserver_info = dict()
@@ -43,9 +43,11 @@ gshare_data = dict()
 gshare_entity_info = dict()
 host_re = None
 opts_W = list()
-pbs_conf = ifl.cvar.pbs_conf
 verbose = 0
 version = "0.1"
+
+conf.gNow = gNow
+pbs_conf = ifl.cvar.pbs_conf
 
 def main():
     global gNAS, verbose, args, opts_W, host_re, gdebug
@@ -102,8 +104,8 @@ def main():
         help='Jobs, queues, or servers to status')
 
     args = parser.parse_args()
-    verbose = args.verbose
-    gdebug = ' '.join(args.debug)
+    conf.verbose = verbose = args.verbose
+    conf.gdebug = gdebug = ' '.join(args.debug)
 
     if (ifl.pbs_loadconf(0) == 0):
         print("Cannot get PBS configuration information", file=sys.stderr)
@@ -122,7 +124,7 @@ def main():
         default_fields = ['jobid', 'user', 'queue', 'jobname', 'cpus', 'nds',
             'reqdwallt', 's', 'elapwallt', 'eff']
         known_fields = gen_field_list()
-        if args.verbose > 2:
+        if verbose > 2:
             # Show titles of known fields
             l = []
             for x in known_fields:
@@ -134,27 +136,28 @@ def main():
     opts_W = args.W
     if opts_W is None:
         opts_W = list()
-    gNAS = check_W_bool('NAS')
+    conf.gNAS = gNAS = check_W_bool('NAS')
     # Make units for sizes available in opt_W
-    opts_W.append(args.size_units)
+    opts_W.insert(0,args.size_units)
     # Get our hostname
-    ghostname = socket.gethostname()
-    ghostnameshort = ghostname.split('.')[0]
+    conf.ghostname = ghostname = socket.gethostname()
+    conf.ghostnameshort = ghostnameshort = ghostname.split('.')[0]
     # Load possible user or system overrides
+    conf.opts_W = opts_W
     more_code = load_userexits('qstat')
     if more_code:
         more_code = userexits_header + more_code
-        if args.verbose > 2:
+        if verbose > 2:
             print(more_code)
         prog = compile(more_code, 'userexit code', 'exec')
         exec(prog, globals(), locals())
     default_W = []
     userexit_post_opts(globals(), locals())
     opts_W[0:0] = default_W
-    fmtr = NAS_field_format(default_fields, verbose, opts_W)
+    fmtr = NAS_field_format(default_fields)
     fmtr.known_fields = known_fields
     userexit_add_fields(globals(), locals())
-    # Handle -W options
+    # Handle -W formatting options
     # First, collect list of fields of interest and which PBS attributes
     # hold the values for those fields
     (field_list, attr_list, errs) = fmtr.collect_fields()
@@ -176,7 +179,7 @@ def main():
     host_patt = check_W_str('host')
     if host_patt == None:
         host_patt = check_W_str('hosts')
-    # Convert list in form aaa,bbb,ccc to pattern alternative aaa|bbb|ccc
+    # Convert host list in form aaa,bbb,ccc to pattern alternative aaa|bbb|ccc
     # and compile it.
     if host_patt:
         host_re = re.compile(r'\b('+host_patt.replace(',','|')+r')\b', re.I)
@@ -196,15 +199,15 @@ def main():
         attr_list.add('Job_Name')
     # Build list of attributes we need to ask for.
     bu = BatchUtils()
-    t = (','.join(attr_list)).split(',')
-    while '' in t:
-        t.remove('')
+    attr_list = (','.join(attr_list)).split(',')
+    while '' in attr_list:
+        attr_list.remove('')
     if verbose > 2:
-        print('Requested attribute list:', ', '.join(t))
+        print('Requested attribute list:', ', '.join(attr_list))
     # An empty attribute list is rejected. For servers and queues, just
     # ask for everything. For jobs, ask for something easy.
-    if len(t) > 0:
-        atl = bu.list_to_attrl(t)
+    if len(attr_list) > 0:
+        atl = bu.list_to_attrl(attr_list)
     else:
         if do_jobs:
             t = ['job_state']
@@ -376,13 +379,8 @@ def display_jobs(args, fmtr):
             display_shares(gshare_entity_info)
         # Get info for selected jobs
         sname = current_server.split('.')[0]
-        mo = re.search(r'fake_jobs_%s=([^\s]+)' % sname, gdebug)
-        if mo:
-            with open(mo.group(1)) as fd:
-                lines = fd.read()
-                bs = file_to_stat(lines)
-                del lines
-        else:
+        bs = file_to_stat(sname, 'jobs', fmtr.atl)
+        if bs is None:
             if sel_attr:
                 bs = ifl.pbs_selstat(conn, sel_attr, fmtr.atl, extend)
             else:
@@ -707,13 +705,8 @@ def cache_server(server, conn):
     if sname in gserver_info:
         return gserver_info[sname]
     bu = BatchUtils()
-    mo = re.search(r'fake_server_%s=([^\s]+)' % sname, gdebug)
-    if mo:
-        with open(mo.group(1)) as fd:
-            lines = fd.read()
-            bs = file_to_stat(lines)
-            del lines
-    else:
+    bs = file_to_stat(sname, 'server')
+    if bs is None:
         bs = ifl.pbs_statserver(conn, None, None)
     info = bs[0]
     gserver_info[sname] = info
@@ -728,28 +721,18 @@ def cache_server(server, conn):
         'resources_available', 'resources_assigned']
     if check_W_bool('node_comments', False):
         atrs.append('comment')
-    atrl = bu.list_to_attrl(atrs)
-    mo = re.search(r'fake_vnodes_%s=([^\s]+)' % sname, gdebug)
-    if mo:
-        with open(mo.group(1)) as fd:
-            lines = fd.read()
-            mom_info = file_to_stat(lines)
-        del lines
-    else:
+    mom_info = file_to_stat(sname, 'vnodes', atrs)
+    if mom_info is None:
+        atrl = bu.list_to_attrl(atrs)
         mom_info = ifl.pbs_statvnode(conn, None, atrl, None)
     # Condense vnode info into natural vnodes if desired
     if check_W_bool('condense_vnodes'):
         mom_info = condense_vnode_info(mom_info)
     info['mom_info'] = mom_info
     atrs = ['reserve_end', 'reserve_start']
-    atrl = bu.list_to_attrl(atrs)
-    mo = re.search(r'fake_resvs_%s=([^\s]+)' % sname, gdebug)
-    if mo:
-        with open(mo.group(1)) as fd:
-            lines = fd.read()
-            resv_info = file_to_stat(lines)
-        del lines
-    else:
+    resv_info = file_to_stat(sname, 'resvs', atrs)
+    if resv_info == None:
+        atrl = bu.list_to_attrl(atrs)
         resv_info = ifl.pbs_statresv(conn, None, atrl, None)
     info['resv_info'] = resv_info
     return info
@@ -849,12 +832,12 @@ def display_server_hdr(server, args, opts_W):
         print("\t+++ Scheduling turned off.")
     # Display info about MoMs
     all_resvs = info.get('resv_info',())
-    fmta_init(gNAS, opts_W, all_resvs, userexit_interest, gNow)
+    fmta_init(all_resvs, userexit_interest)
     node_detail = check_W_bool('node_detail')
     default_fields = ['host', 'cpus', 'gpus', 'tasks', 'jobs', 'ninfo']
     if node_detail:
         default_fields = ['host', 'cused', 'cfree', 'gused', 'gfree', 'mused', 'mfree', 'tasks', 'jobs', 'ninfo']
-    fmtr = NAS_field_format(default_fields, verbose, opts_W, 'fmta')
+    fmtr = NAS_field_format(default_fields, 'fmta')
     fmtr.known_fields = gen_field_list_a()
     userexit_add_fields_a(globals(), locals())
     (field_list, attr_list, errs) = fmtr.collect_fields('oa')
@@ -1140,7 +1123,7 @@ def gen_field_list_a():
 def add_server_conn(smap, svr, conn):
     '''Add mappings from server to PBS connection
 
-    Given a server name, look up its fqdn, IP addresses, aliase and
+    Given a server name, look up its fqdn, IP addresses, aliases and
     add them to a mapping from server to connection.
 
     Args:

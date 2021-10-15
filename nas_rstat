@@ -20,6 +20,7 @@ import time
 PBS_EXEC = os.environ.get('PBS_EXEC', '/PBS')
 sys.path.append(os.path.join(PBS_EXEC, 'lib', 'site'))
 
+import nas_xstat_config as conf
 import pbs_ifl as ifl
 from nas_utils import *
 from nas_pbsutil import *
@@ -34,13 +35,10 @@ to pbs_rstat, but accepts field selections similarly to NAS's qstat.
 '''
 
 pbs_conf = ifl.cvar.pbs_conf
-verbose = 0
-args = None
-host_re = None
-opts_W = list()
+version = "0.2"
 
 def main():
-    global verbose, args, host_re, opts_W
+    global version
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, signal.NSIG):
         try:
@@ -59,16 +57,16 @@ def main():
     parser.add_argument('--verbose', '-v', default=0, action='count',
         help='increase debugging verbosity')
     parser.add_argument('--version', action='version',
-        version='%(prog)s $Id:$')
+        version='%(prog)s ' + version)
     parser.add_argument('-W', action='append', metavar='display option',
         help='options affecting field selection and disply. See qstat.1B')
     parser.add_argument('resvids', nargs=argparse.REMAINDER,
         help='reservations to list')
 
-    args = parser.parse_args()
+    args = conf.args = parser.parse_args()
 
     default_fields = ['name', 'queue', 'user', 'state', 'start', 'duration', 'end']
-    verbose = args.verbose
+    conf.verbose = args.verbose
     levels = 0
     if args.B: levels += 1
     if args.F: levels += 1
@@ -82,7 +80,7 @@ def main():
         opts_W = list()
     if args.B:
         default_fields = ['name']
-
+    conf.opts_W = opts_W
     if (ifl.pbs_loadconf(0) == 0):
         print("Cannot get PBS configuration information", file=sys.stderr)
         return 1
@@ -92,12 +90,16 @@ def main():
         prog = compile(more_code, 'userexit code', 'exec')
         exec(prog, globals(), locals())
     userexit_post_opts(globals(), locals())
-    fmtr = NAS_field_format(default_fields, verbose, opts_W)
+    fmtr = NAS_field_format(default_fields)
     fmtr.known_fields = gen_field_list()
     userexit_add_fields(globals(), locals())
     # Handle -W options
     (field_list, attr_list, errs) = fmtr.collect_fields()
     if (errs):
+        # Check if should just print list of fields
+        if field_list is None:
+            print('\n'.join(errs))
+            return 0
         print(errs, file = sys.stderr)
     rc = fmtr.adjust_formats(field_list)
     if rc != True:
@@ -113,6 +115,7 @@ def main():
         host_re = re.compile(r'\b('+host_patt.replace(',','|')+r')\b', re.I)
     else:
         host_re = None
+    conf.host_re = host_re
     if host_re:
         # If we are filtering by host, make sure we ask for resv_nodes
         attr_list.add('resv_nodes')
@@ -177,8 +180,6 @@ def display_standard(resvs, fmtr):
         resvs = list of info for reservations
         fmtr = field formatter object
     '''
-    global opts_W
-
     c = layout.Config()
     for fld in fmtr.field_list:
         title = fld['title']
@@ -193,7 +194,7 @@ def display_standard(resvs, fmtr):
             row.append(func(f, resv))
         rows.append(row)
     if rows:
-        show_hdr = '-h' not in opts_W
+        show_hdr = '-h' not in conf.opts_W
         res = layout.layout(c, rows, show_hdr=show_hdr)
         print('\n'.join([x.rstrip() for x in res]))
 
@@ -271,32 +272,31 @@ def get_resv_info(resvids, attr_list):
                     break
                 cur_server = server
             bs1 = ifl.pbs_statresv(conn, seq_no, atl, None)
-            if verbose > 1:
+            if conf.verbose > 1:
                 print(bs1)
             bs.extend(bs1)
     if conn != None and conn >= 0:
         ifl.pbs_disconnect(conn)
     # If filtering by host, keep only interesting reservations
-    if host_re:
+    if conf.host_re:
         newbs = []
         for resv in bs:
             resv_nodes = resv.get('resv_nodes')
             if not resv_nodes:
                 continue
-            if not host_re.search(resv_nodes):
+            if not conf.host_re.search(resv_nodes):
                 continue
             newbs.append(resv)
         bs = newbs
-    if verbose > 1:
+    if conf.verbose > 1:
         print (bs)
     return bs
 
 def check_W_str(name, default=''):
-    global opts_W
     namee = name + '='
     # Last match decides, so search backward
-    for idx in range(len(opts_W)-1, -1, -1):
-        wopt = opts_W[idx]
+    for idx in range(len(conf.opts_W)-1, -1, -1):
+        wopt = conf.opts_W[idx]
         # Option by itself is default
         if wopt == name:
             return default
