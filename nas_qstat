@@ -1105,12 +1105,12 @@ def gen_field_list_a():
     '''
     fl = []
     fl.append(gen_field('host', 'Host', {'rj':'lr'}, 'fmta_host', None, 'sum_hosts'))
-    fl.append(gen_field('cpus', 'CPUs', {'hj':'r'}, 'fmta_count', 'resources_available', 'ncpus sum squash0'))
+    fl.append(gen_field('cpus', 'CPUs', {'hj':'r'}, 'fmta_count', 'resources_available', 'ncpus sum'))
     fl.append(gen_field('cused', ['CPUs', 'used'], {'hj':'r', 'hs':'/'}, 'fmta_used', 'resources_assigned', 'ncpus sum'))
     fl.append(gen_field('cfree', 'free', {'hj':'l', 'rj':'r'}, 'fmta_free', 'resources_available resources_assigned', 'ncpus sum'))
-    fl.append(gen_field('gpus', 'GPUs', {'hj':'r', 'suppress':True}, 'fmta_count', 'resources_available', 'ngpus sum squash0'))
-    fl.append(gen_field('gused', ['GPUs', 'used'], {'hj':'r', 'hs':'/', 'suppress':True}, 'fmta_used', 'resources_assigned', 'ngpus sum squash0'))
-    fl.append(gen_field('gfree', ['', 'free'], {'hj':'l', 'rj':'r', 'suppress':True}, 'fmta_free', 'resources_available resources_assigned', 'ngpus sum squash0'))
+    fl.append(gen_field('gpus', 'GPUs', {'hj':'r', 'suppress':True}, 'fmta_count', 'resources_available', 'ngpus sum'))
+    fl.append(gen_field('gused', ['GPUs', 'used'], {'hj':'r', 'hs':'/', 'suppress':True}, 'fmta_used', 'resources_assigned', 'ngpus sum'))
+    fl.append(gen_field('gfree', ['', 'free'], {'hj':'l', 'rj':'r', 'suppress':True}, 'fmta_free', 'resources_available resources_assigned', 'ngpus sum'))
     fl.append(gen_field('mem', 'Mem', {'hj':'r'}, 'fmta_mem', 'resources_available', 'mem sum_mem'))
     fl.append(gen_field('mused', ['Mem', 'used'], {'hj':'r', 'hs':'/'}, 'fmta_mem', 'resources_assigned', 'mem sum_mem'))
     fl.append(gen_field('mfree', 'free', {'hj':'l', 'rj':'r'}, 'fmta_mfree', 'resources_available resources_assigned', 'mem sum_mem'))
@@ -1549,7 +1549,7 @@ def summarize_nodes(flist, nlist):
             for mom_row in nlist:
                 t = mom_row[idx]
                 total += unsuffix(t) if t != '--' else 0.0
-            fldval = ensuffix(total) if total else '--'
+            fldval = ensuffix(total)
         elif 'sum_jobs' in opt:
             total = 0
             for mom_row in nlist:

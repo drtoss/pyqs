@@ -602,14 +602,14 @@ def geta_from_rsrc(fi, info, missing=None):
 
 def fmta_count(fi, info):
     '''Countable resource'''
-    v = geta_from_rsrc(fi, info)
+    v = geta_from_rsrc(fi, info, "0")
     if v:
         return v[0]
     return '0'
 
 def fmta_free(fi, info):
     '''Free countable resource'''
-    v = geta_from_rsrc(fi, info)
+    v = geta_from_rsrc(fi, info, "0")
     if len(v) == 2:
         count = safeint(v[0])
         used = safeint(v[1])
@@ -710,13 +710,13 @@ def fmta_jcnt(fi, info):
 
 def fmta_mem(fi, info):
     '''Memory resource total or used'''
-    v = geta_from_rsrc(fi, info)
+    v = geta_from_rsrc(fi, info, "0")
     mem = unsuffix(v[0]) if len(v) > 0 else 0.0
-    return ensuffix(mem) if mem > 0.0 else '--'
+    return ensuffix(mem)
 
 def fmta_mfree(fi, info):
     '''Node memory free'''
-    v = geta_from_rsrc(fi, info)
+    v = geta_from_rsrc(fi, info, "0")
     if len(v) == 2:
         totm = unsuffix(v[0])
         used = unsuffix(v[1])
@@ -739,10 +739,10 @@ def fmta_tcnt(fi, info):
 
 def fmta_used(fi, info):
     '''Assigned countable resource'''
-    v = geta_from_rsrc(fi, info, '0')
+    v = geta_from_rsrc(fi, info, "0")
     if v:
         return v[0]
-    return '0'
+    return "0"
 
 # Misc helper functions for formatting routines
 
