@@ -126,7 +126,7 @@ def file_to_stat(host, stat, attrs=[]):
         None if there isn't any appropriate fake file specified.
         Else a dictionary with the attributes and values.
     '''
-    mo = re.search(f'fake_{stat}_{host}=([^\s]+)', conf.gdebug)
+    mo = re.search('fake_%s_%s=([^\s]+)' % (stat, host), conf.gdebug)
     if not mo:
         return None
     fname = mo.group(1)
