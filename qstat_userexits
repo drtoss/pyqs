@@ -19,6 +19,7 @@ else:
 
     # Set up routine to set default -W values
     def site_post_opts(gbl, lcl):
+        lcl['default_W'].extend(['NAS'])
         lcl['default_W'].extend(['node_detail', 'model'])
         lcl['default_W'].extend(['fmt_jobname=maxw:20 hj:e ht:...'])
         if gbl['ghostnameshort'] in ['pbspl4', 'server2']:

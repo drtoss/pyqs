@@ -137,7 +137,6 @@ def main():
     if opts_W is None:
         opts_W = list()
     conf.opts_W = opts_W
-    conf.gNAS = gNAS = check_W_bool('NAS')
     # Make units for sizes available in opt_W
     opts_W.insert(0,args.size_units)
     # Get our hostname
@@ -154,6 +153,7 @@ def main():
     default_W = []
     userexit_post_opts(globals(), locals())
     opts_W[0:0] = default_W
+    conf.gNAS = gNAS = check_W_bool('NAS')
     fmtr = NAS_field_format(default_fields)
     fmtr.known_fields = known_fields
     userexit_add_fields(globals(), locals())
