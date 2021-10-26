@@ -4,6 +4,7 @@ import re
 import pbs_ifl as ifl
 import os
 import socket
+import stat
 import sys
 
 import nas_xstat_config as conf
@@ -49,7 +50,7 @@ def get_server(job_id):
             try:
                 (hname, alias, ipaddr) = socket.gethostbyname_ex(parent_server)
                 parent_server = hname
-            except socket.herror:
+            except OSError:
                 pass
             job_id_out = job_id_out + '.' + parent_server
             if not server_out:
@@ -204,6 +205,8 @@ def load_userexits(prefix):
         Catenation of all userexit file contents
     '''
     code = ''
+    user = os.getuid()
+    if user == 1000: user = 501 # XXX for debugging on MacOS
     # Load system userexit, if present.
     pbs_exec = pbs_conf.pbs_exec_path
     t = os.environ.get('NAS_QSTAT_EXEC')
@@ -212,9 +215,14 @@ def load_userexits(prefix):
     if pbs_exec:
         path = os.path.join(pbs_exec, 'lib', 'site', '%s_userexits' % prefix)
         try:
-            if os.stat(path):
-                with open(path) as f:
-                    code += f.read()
+            sbuf = os.stat(path)
+            # Be careful about what we load
+            if sbuf:
+                if sbuf.st_uid == 0 or sbuf.st_uid == user:
+                    mode = stat.S_ISDIR(sbuf.st_mode)
+                    if (mode & (stat.S_IWGRP|stat.S_IWOTH)) == 0:
+                        with open(path) as f:
+                            code += f.read()
         except OSError:
             pass
     # Append any user's userexit code
@@ -224,9 +232,13 @@ def load_userexits(prefix):
     if home is not None:
         path = os.path.join(home, '.%s_userexits' % prefix)
         try:
-            if os.stat(path):
-                with open(path) as f:
-                    code += f.read()
+            sbuf = os.stat(path)
+            if sbuf:
+                if sbuf.st_uid == 0 or sbuf.st_uid == user:
+                    mode = stat.S_ISDIR(sbuf.st_mode)
+                    if (mode & (stat.S_IWGRP|stat.S_IWOTH)) == 0:
+                        with open(path) as f:
+                            code += f.read()
         except OSError:
             pass
     return code

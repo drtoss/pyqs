@@ -1,24 +1,73 @@
-#!/PBS/bin/pbs_python
-# $Header:$
-#Author:dtalcott
-#Purpose:Python equivalent of pbs_rstat, but with options for how
-#Purpose:to display the output.
-#Purpose:Use --help for details.
-#Last-modified: $Author: dtalcott $ on $Date: 2020/06/13 12:09:40 $
-#Reviewed-by: 
-#Reviewed-on: 
+#!/usr/bin/python3 -I
+
+def check_perms():
+    '''Because this program might be run as root, or with
+    a random environment, check for some conditions that
+    might cause security issues.
+    '''
+    import sys, os, stat
+    user = os.getuid()
+    # First, clean up python search path by removing
+    # dodgy entries.
+    newp = []
+    for x in sys.path:
+        if x is '':
+            continue
+        try:
+            sb = os.stat(x)
+        except OSError:
+            continue
+        # Skip items not owned by root, unless
+        # running as the owner of the item.
+        if sb.st_uid != 0 and user != sb.st_uid:
+            continue
+        # Skip non-directories in path
+        if not stat.S_ISDIR(sb.st_mode):
+            continue
+        # Skip things that others can modify
+        mode = stat.S_IMODE(sb.st_mode)
+        if (mode & (stat.S_IWGRP|stat.S_IWOTH)):
+            continue
+        if x not in newp:
+            newp.append(x)
+    # Update sys.path to what is left
+    sys.path.clear()
+    sys.path.extend(newp)
+
+    # Now, check that we haven't already loaded
+    # suspect items.
+    for name, val in sys.modules.items():
+        src = str(val)
+        pcs = src.split()
+        pathpart = pcs[-1]
+        path = pathpart[1:-2]
+        if path in ['built-in', 'frozen']:
+            continue
+        if name == '__main__':
+            # For debugging, we might need to
+            # add the directory where the script
+            # resides back to sys.path, if
+            # the -I flag removed it.
+            t = os.path.dirname(path)
+            t = os.path.abspath(t)
+            if t not in sys.path:
+                sys.path.insert(0, t)
+            continue
+        sb = os.stat(path)
+        if sb.st_uid != 0 and user != sb.st_uid:
+            raise OSError("Unsafe PYTHONPATH")
+
+check_perms()
 
 import sys
 import os
 import argparse
 import re
-import subprocess
 import signal
 import socket
+import stat
+import subprocess
 import time
-
-PBS_EXEC = os.environ.get('PBS_EXEC', '/PBS')
-sys.path.append(os.path.join(PBS_EXEC, 'lib', 'site'))
 
 import nas_xstat_config as conf
 import pbs_ifl as ifl
@@ -35,7 +84,7 @@ to pbs_rstat, but accepts field selections similarly to NAS's qstat.
 '''
 
 pbs_conf = ifl.cvar.pbs_conf
-version = "0.2"
+version = "0.2.2"
 
 def main():
     global version
@@ -247,7 +296,8 @@ def get_resv_info(resvids, attr_list):
         # Ask for all reservations
         conn = ifl.pbs_connect(None)
         if conn < 0:
-            print("Cannot connect to PBS server: %s" % ifl.pbs_Errno(),
+            print("Cannot connect to PBS server: %s" %
+                os.strerror(ifl.get_pbs_errno()),
                 file = sys.stderr)
             return None
         bs = ifl.pbs_statresv(conn, None, atl, None)
@@ -268,7 +318,7 @@ def get_resv_info(resvids, attr_list):
                 conn = ifl.pbs_connect(server)
                 if conn < 0:
                     print("Cannot connect to PBS server %s: %s" % \
-                        (server, ifl.pbs_Errno()))
+                        (server, os.strerror(ifl.get_pbs_errno())))
                     break
                 cur_server = server
             bs1 = ifl.pbs_statresv(conn, seq_no, atl, None)

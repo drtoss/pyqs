@@ -223,7 +223,7 @@ def set_field_vars(opts):
     # gszunits = units for display of sizes
     gszunits = 'G' if 'G' in opts else 'M' if 'M' in opts else 'b'
     # ghuman = True to use human readable
-    ghuman = '-H' in opts or 'human' in opts or gszunits != 'b'
+    ghuman = 'human' in opts or gszunits != 'b'
     # gnow = current epoch time
     gnow = int(time.time())
     # gropt = True if -W raw for raw values
@@ -808,6 +808,43 @@ def decode_resv_state_full(rawv):
             "RESV_FINISHED", "RESV_BEING_DELETED", "RESV_DELETED",
             "RESV_DELETING_JOBS", "RESV_DEGRADED", "RESV_BEING_ALTERED",
             "RESV_IN_CONFLICT")[int(rawv)]
+
+
+__all__.append('define_on_the_fly')
+def define_on_the_fly(cur_flds, opts_W, which='o'):
+    '''Handle on the fly field definitions
+
+    The -W o= and oa= options can define additional fields that simply
+    take their values from status attributes.
+    '''
+    # Scan opts_W for the interesting arguments
+    for key,value in [x.split('=',1) if '=' in x else [x,''] for x in opts_W]:
+        if key != which:
+            continue
+        if value[0] in '+-':
+            value = value[1:]
+        for fld_name in value.split(','):
+            if '_' not in fld_name:
+                continue
+            pfx, name = fld_name.split('_', 1)
+            title = name.title() if name.islower() else name
+            rj = {'hj': 'r'}
+            if pfx == 'A':
+                # Simple attribute
+                new_fld = gen_field(fld_name, title, None, 'fmt_by_attr', name)
+            elif pfx == 'RA':
+                # Node resources available
+                new_fld = gen_field(fld_name, title, rj, 'fmt_from_rsrc', 'resources_available', name)
+            elif pfx == 'RI':
+                new_fld = gen_field(fld_name, title, rj, 'fmt_from_rsrc', 'resources_assigned', name)
+            elif pfx == 'RL':
+                new_fld = gen_field(fld_name, title, rj, 'fmt_from_rsrc', 'resources_used', name)
+            elif pfx == 'RU':
+                # Job resources used
+                new_fld = gen_field(fld_name, name, rj, 'fmt_from_rsrc', 'resources_used', name)
+            else:
+                continue
+            cur_flds.append(new_fld)
 
 __all__.append('ensuffix')
 def ensuffix(v, units=None):

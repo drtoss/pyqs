@@ -1,5 +1,4 @@
 # Enable NAS-specific features
-import nas_xstat_config as conf
 globals()['gNAS'] = True
 
 # Possibly do different things based on whether we are statusing hosts,
@@ -19,11 +18,12 @@ else:
 
     # Set up routine to set default -W values
     def site_post_opts(gbl, lcl):
-        lcl['default_W'].extend(['NAS'])
-        lcl['default_W'].extend(['node_detail', 'model'])
-        lcl['default_W'].extend(['fmt_jobname=maxw:20 hj:e ht:...'])
+        default_W = lcl['default_W']
+        default_W.extend(['NAS'])
+        default_W.extend(['node_detail', 'model'])
+        default_W.extend(['fmt_jobname=maxw:20 hj:e ht:...'])
         if gbl['ghostnameshort'] in ['pbspl4', 'server2']:
-            lcl['default_W'].extend(['condense_vnodes'])
+            default_W.extend(['condense_vnodes'])
 
     userexit_post_opts = stack_userexit(userexit_post_opts, site_post_opts)
 
