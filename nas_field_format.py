@@ -279,16 +279,23 @@ def fmt_comment(fi, info):
 
 def fmt_date(fi, info):
     rawv = fmt_by_attr(fi, info)
-    if gropt or rawv == '--':
-        return rawv
-    result = time.strftime(r'%y-%m-%d/%H:%M', time.localtime(int(rawv)))
-    return result
+    if rawv.isdigit():
+        t = time.localtime(int(rawv))
+    else:
+        if rawv == '--':
+            return rawv
+        t = time.strptime(rawv)
+    return time.strftime(r'%y-%m-%d/%H:%M', t)
 
 def fmt_date_full(fi, info):
     rawv = fmt_by_attr(fi, info)
-    if gropt or rawv == '--':
-        return rawv
-    result = time.strftime(r'%c', time.localtime(int(rawv)))
+    if rawv.isdigit():
+        t = time.localtime(int(rawv))
+    else:
+        if rawv == '--':
+            return rawv
+        t = time.strptime(rawv)
+    result = time.strftime(r'%c', t)
     return result
     
 def fmt_duration(fi, info):
@@ -538,9 +545,9 @@ def fmt_remaining(fi, info):
 
 def fmt_resv_state(fi, info):
     rawv = fmt_by_attr(fi, info)
-    if gropt or rawv == '--':
-        return rawv
-    return decode_resv_state(rawv)
+    if rawv.isdigit():
+        return decode_resv_state(rawv)
+    return decode_resv_state_str(rawv)
 
 def fmt_seqno(fi, info):
     rawv = info.get('id', '--')
@@ -799,15 +806,32 @@ def decode_epoch_full(rawv):
     result = time.strftime('%c', time.localtime(int(rawv)))
     return result
 
+_resv_states = [
+    ("--", "RESV_NONE"),
+    ("UN", "RESV_UNCONFIRMED"),
+    ("CO", "RESV_CONFIRMED"),
+    ("WT", "RESV_WAIT"),
+    ("TR", "RESV_TIME_TO_RUN"),
+    ("RN", "RESV_RUNNING"),
+    ("FN", "RESV_FINISHED"),
+    ("BD", "RESV_BEING_DELETED"),
+    ("DE", "RESV_DELETED"),
+    ("DJ", "RESV_DELETING_JOBS"),
+    ("DG", "RESV_DEGRADED"),
+    ("AL", "RESV_BEING_ALTERED"),
+    ("IC", "RESV_IN_CONFLICT")
+    ]
 def decode_resv_state(rawv):
-    return ("--",  "UN", "CO", "WT", "TR", "RN", "FN", "BD", "DE", "DJ", "DG", "AL", "IC")[int(rawv)]
+    return _resv_states[int(rawv)][0]
 
 def decode_resv_state_full(rawv):
-    return ("RESV_NONE", "RESV_UNCONFIRMED", "RESV_CONFIRMED",
-            "RESV_WAIT", "RESV_TIME_TO_RUN", "RESV_RUNNING",
-            "RESV_FINISHED", "RESV_BEING_DELETED", "RESV_DELETED",
-            "RESV_DELETING_JOBS", "RESV_DEGRADED", "RESV_BEING_ALTERED",
-            "RESV_IN_CONFLICT")[int(rawv)]
+    return _resv_states[int(rawv)][1]
+
+def decode_resv_state_str(rawv):
+    for x in _resv_states:
+        if x[1] == rawv:
+            return x[0]
+    return '??'
 
 
 __all__.append('define_on_the_fly')

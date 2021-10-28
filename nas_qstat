@@ -7,6 +7,7 @@ def check_perms():
     '''
     import sys, os, stat
     user = os.getuid()
+    if user == 1000: user = 501 # XXX Hack for VirtualBox under MacOS
     # First, clean up python search path by removing
     # dodgy entries.
     newp = []
@@ -53,10 +54,10 @@ def check_perms():
             if t not in sys.path:
                 sys.path.insert(0, t)
             continue
-        sb = os.stat(path)
-        if sb.st_uid != 0 and user != sb.st_uid:
-            raise OSError("Unsafe PYTHONPATH")
-
+        if "' from '" in src:
+            sb = os.stat(path)
+            if sb.st_uid != 0 and user != sb.st_uid:
+                raise OSError("Unsafe PYTHONPATH with " + path)
 check_perms()
 
 import sys
@@ -845,6 +846,7 @@ def display_server_hdr(server, conn, args, opts_W):
     sname = server.split('.')[0]
     info = gserver_info[sname]
     new_section()
+    in_server_header = True
     current_server = info.get('id', server)
     print(current_server + ':    ', time.asctime(time.localtime()))
     # Create one-line job header
@@ -944,7 +946,6 @@ def display_server_hdr(server, conn, args, opts_W):
             func = getattr(nas_field_format, f['func'])
             mom_row.append(func(f, minfo))
         mom_list.append(mom_row)
-    in_server_header = True
     userexit_set_server(globals(), locals())
     # Handle summarizing
     nrows = mom_list

@@ -340,6 +340,46 @@ requests nas_qstat to list the currently known fields and then exit.
 The known fields can be changed by the site administrator or by the user.
 The current list is acct, aoe, cnt, cpct, cput, ctime, eff, elapwallt, eligtime, eligwait, estend, eststart, exitstatus, group, jobid, jobname, lifetime, maxwallt, memory, minwallt, mission, model, nds, place, pmem, pri, qtime, queue, rank0, reqid, reqmem, remwallt, reqdwallt, runs, s, sessid, seqno, ss, stime, tsk, user, vmem.
 
+If the attribute or resource you are interested in is not in the known
+field list, you request it by using a field name of 'A_xyz', 'RL_xyz',
+or 'RU_xyz'. The 'A_' prefix indicates a job attribute; 'RL_' is for
+a quantity from the job 'Resource_List' attribute; and 'RU_' refers
+to 'resources_used' by running or completed jobs.
+The
+.I 'xyz'
+portion of the field name must be typed exactly as it appears
+in qstat -f output.
+
+So, for example, if you want to include the Rerunable attribute for jobs,
+you could use
+.RE 1
+.in 0
+.EX
+
+$ nas_qstat -W o=+A_Rerunable
+                                              Req'd    Elap
+JobID         User     Queue Jobname CPUs Nds wallt S wallt Eff Rerunable
+------------- -------- ----- ------- ---- --- ----- - ----- --- ---------
+12479.server2 dtalcott workq STDIN      1   1    -- H 00:00  -- True
+
+.EE
+.RS
+If you want to see how much walltime was used, the following works:
+.RE 1
+.in 0
+.EX
+
+$ nas_qstat -x -W o=+RU_walltime
+                                              Req'd    Elap
+JobID         User     Queue Jobname CPUs Nds wallt S wallt Eff walltime
+------------- -------- ----- ------- ---- --- ----- - ----- --- --------
+12480.server2 dtalcott workq STDIN      2   1 01:00 F 00:01  0% 00:01:05
+
+.EE
+.RS
+If you want to change how these fields are formatted, you can use the
+usual -W fmt_name= method, where the field name includes the prefix. E.g.,
+.B "-W fmt_A_Rerunable=maxw:5".
 .TP
 .BI oa= [+-]field_list
 Like
@@ -348,6 +388,11 @@ except that it applies to the fields in the
 .B -a
 output.
 The current list of known fields is host, cpus, cused, cfree, gpus, gused, gfree, mem, mused, mfree, state, tasks, jobs, ninfo.
+
+As with
+.B o=
+you can add to this list using special names for the fields. In this case, 'A_xyz', 'RA_xyz', or 'RI_xyz'. The 'A_' prefix selects a node attribute; 'RA_'
+selects a resources_available quantity; and 'RI_' selects resources_assigned (in use).
 
 .SH EXIT STATUS
 Normally returns 0. Returns 1 on errors (e.g., nonexistent queue or jobid).
