@@ -87,6 +87,23 @@ which are the global and local symbol tables (resp.) at the point where
 the userexit is being called.
 Interesting global and local symbols are pointed out in the descriptions
 of the various userexits below.
+Some symbols that might be interesting for all userexits are:
+.RS
+.TP
+.B conf.pbs_conf
+Allows access to a read-only copy of the pbs_config structure once
+pbs_loadconf() has been called.
+Of most use is pbs_conf.pbs_server_name, which gives the hostname to
+use to contact the default PBS server for the host where
+.B nas_qstat
+is run.
+.TP
+.B conf.verbose
+The verbosity as specified by
+.B \-\-verbose
+command line arguments.
+.RE
+
 .PP
 To understand the purposes for the various userexits, it helps to know that
 nas_qstat goes through several steps to display its information.
@@ -363,4 +380,80 @@ calls.
 .SH NOTES
 
 .SH EXAMPLES
+The following example might be used by a site with multiple clusters
+where some clusters have GPUs and others do not.
+During initial reading and executing of the script, the field 'gpus'
+is unconditionally added to the default job field list.
+It is added after the 'cpus' field.
+.PP
+The script then defines two userexit functions.
+The first is stacked onto userexit_post_opts to set a few default
+-B \-W
+options.
+It sets the
+.B node_detail
+option so that the
+.B \-a
+output includes more details about node CPU, GPU, and memory use.
+It also limits the width of the Jobname field to 20 characters, with
+end-preserving truncation.
+The
+.B condense_vnodes
+option is set to a list of servers where vnode information should be
+condensed into the natural vnode.
 
+.PP
+The second userexit is stacked onto userexit_set_server.
+Based on which server is being queried it either enables or suppresses
+the GPU fields in the output.
+Note that when GPU info should be displayed, it needs to check the
+.B node_detail
+setting to decide which fields to enable/suppress in the
+.B \-a
+output.
+.EX
+# Possibly do different things based on whether we are statusing hosts,
+# queues, or jobs
+if args.B:
+    pass
+elif args.Q:
+    pass
+else:
+    # We add ngpus to default field list, if not already there
+    if 'gpus' not in default_fields:
+        try:
+            t = default_fields.index('cpus')
+        except:
+            t = len(default_fields) - 1
+        default_fields.insert(t+1, 'gpus')
+
+    # Define routine to set default -W values
+    def site_post_opts(gbl, lcl):
+        pbs_conf = conf.pbs_conf
+        server = pbs_conf.pbs_server_name.split('.')[0]
+        default_W = lcl['default_W']
+        default_W.extend(['node_detail'])
+        default_W.extend(['fmt_jobname=maxw:20 hj:e ht:...'])
+        default_W.extend(['condense_vnodes=pbspl4,server2'])
+
+    userexit_post_opts = stack_userexit(userexit_post_opts, site_post_opts)
+
+    # Define routine to tweak outputs based on server
+    def site_set_server(g, lcl):
+        server_name = lcl['current_server'].split('.')[0]
+        cfg = lcl['cfg']
+        svr_hdr = lcl.get('in_server_header', False)
+        showgpu = server_name in ['pbspl4']
+        if svr_hdr:
+            # Enable/disable all GPU fields in -a node output
+            node_detail = lcl.get('node_detail', False)
+            cfg.change_fieldspec('gpus', suppress=not showgpu or node_detail)
+            cfg.change_fieldspec('gused', suppress=not showgpu or not node_detail)
+            cfg.change_fieldspec('gfree', suppress=not showgpu or not node_detail)
+        else:
+            # Enable/disable job GPU column
+            cfg.change_fieldspec('gpus', suppress=not showgpu)
+
+    userexit_set_server = stack_userexit(userexit_set_server, site_set_server)
+
+.EE

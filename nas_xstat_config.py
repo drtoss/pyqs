@@ -8,4 +8,5 @@ ghostname = ''			# Our hostname
 ghostnameshort = ''		# Short hostname
 host_re = None			# Hostname pattern
 opts_W = list()			# -W options, as list
+pbs_conf = None			# pbs config options
 verbose = 0			# Verbosity flag

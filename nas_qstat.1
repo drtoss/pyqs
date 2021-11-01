@@ -248,12 +248,18 @@ described above, except applied to the fields in the
 node output.
 
 .TP
-.B condense_vnodes
-For nodes with multiple vnodes, when a vnode agrees with the
+.BI condense_vnodes=host[,host...]
+If the PBS server appears in the comma-separated list of hosts,
+then nodes with multiple vnodes should be summarized in the
+.B \-a output.
+That is, when a vnode agrees with the
 natural vnode in queue and vntype, and when its state is
 similar to the natural vnode's state, then sum the vnode's
 resources into the entry for the natural vnode. Otherwise,
 the vnode appears by itself.
+.sp
+Instead of a host list, the values "True" or "False" (or "t"/"f") can be
+used to enable/disable condensing for all servers.
 .TP
 .BI host[s]= host_pattern
 Restrict reporting of jobs to those running on nodes whose names match the

@@ -99,7 +99,7 @@ verbose = 0
 version = "0.1.2"
 
 conf.gNow = gNow
-pbs_conf = ifl.cvar.pbs_conf
+conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
 
 def main():
     global gNAS, verbose, args, opts_W, host_re, gdebug
@@ -929,7 +929,10 @@ def display_server_hdr(server, conn, args, opts_W):
                 if conn is not None:
                     mom_info = ifl.pbs_statvnode(conn, None, atl, None)
             # Condense vnode info into natural vnodes if desired
-            if check_W_bool('condense_vnodes'):
+            condense = check_W_bool('condense_vnodes', None)
+            if condense == None:
+                condense = sname in check_W_str('condense_vnodes').split(',')
+            if condense:
                 mom_info = condense_vnode_info(mom_info)
         info['mom_info'] = mom_info
     mom_list = []

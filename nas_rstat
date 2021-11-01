@@ -85,7 +85,7 @@ to pbs_rstat, but accepts field selections similarly to NAS's qstat.
 
 gdebug = []
 
-pbs_conf = ifl.cvar.pbs_conf
+conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
 version = "0.2.2"
 
 def main():
@@ -182,6 +182,8 @@ def main():
         attr_list = None
     # Collect the info
     resvs = get_resv_info(args.resvids, attr_list)
+    if resvs == None:
+        sys.exit(1)
     userexit_post_statresv(globals(), locals())
     # Display it
     if args.B:
