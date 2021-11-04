@@ -218,16 +218,14 @@ def set_field_vars(opts):
     That is, certain command line arguments affect the formatting for
     multiple field types. Check for and remember those arguments.
     '''
-    global gnow, gropt, gszunits, ghuman
+    global gnow, gszunits, ghuman
 
     # gszunits = units for display of sizes
     gszunits = 'G' if 'G' in opts else 'M' if 'M' in opts else 'b'
     # ghuman = True to use human readable
     ghuman = 'human' in opts or gszunits != 'b'
     # gnow = current epoch time
-    gnow = int(time.time())
-    # gropt = True if -W raw for raw values
-    gropt = '-r' in opts or 'raw' in opts
+    gnow = conf.gNow
 
 __all__.append('set_entity_map')
 def set_entity_map(themap):
@@ -273,8 +271,6 @@ def fmt_aoe(fi, info):
 subst_white_space = str.maketrans(' \t\n\r', '____')
 def fmt_comment(fi, info):
     rawv = fmt_by_attr(fi, info)
-    if gropt or rawv == '--':
-        return rawv
     return rawv.translate(subst_white_space)
 
 def fmt_date(fi, info):
@@ -300,8 +296,6 @@ def fmt_date_full(fi, info):
     
 def fmt_duration(fi, info):
     rawv = fmt_by_attr(fi, info)
-    if gropt or rawv == '--':
-        return rawv
     return secstoclock(int(rawv))
 
 def fmt_efficiency(fi, info):
@@ -329,8 +323,6 @@ def fmt_elapsed(fi, info):
     state = info.get('job_state', '?')
     if state in 'RSBEFX':
         rawv = info.get('resources_used.walltime', '--')
-        if gropt or rawv == '--':
-            return rawv
         return secstoclock(clocktosecs(rawv), False, ghuman)
     etime = info.get('etime', gnow)
     t = gnow - int(etime)
@@ -422,8 +414,6 @@ def fmt_future_date(fi, info):
 
 def fmt_id(fi, info):
     rawv = info['id']
-    if gropt or rawv == '--':
-        return rawv
     return rawv.split('.')[0]
 
 def fmt_jobid(fi, info):
@@ -472,8 +462,6 @@ modelre = re.compile(r'^(\d+)?.*\bmodel=(\w+)')
 def fmt_model(fi, info):
     # Raw format: 4:ncpus=3:model=sky_gpu:bigmem=false
     rawv = fmt_by_attr(fi, info)
-    if gropt or rawv== '--':
-        return rawv
     models=[]
     for chunk in rawv.split('+'):
         mo = modelre.search(chunk)
@@ -492,8 +480,6 @@ def fmt_name(fi, info):
 def fmt_nodes(fi, info):
     # Raw format:  (r789i0n4:ncpus=1)+(r789i0n5:ncpus=1)
     rawv = fmt_by_attr(fi, info)
-    if gropt or rawv == '--':
-        return rawv
     items = rawv.split('+')
     nodes = list()
     for item in items:
@@ -521,8 +507,6 @@ def fmt_queue_info(fi, info):
 def fmt_rank0(fi, info):
     # Raw format:  node1/0+node1/1+node2/0
     rawv = fmt_by_attr(fi, info)
-    if gropt or rawv == '--':
-        return rawv
     rank0 = rawv.split('/',1)[0]
     if rank0:
         return rank0
@@ -576,8 +560,6 @@ def fmt_user(fi, info):
     '''Raw format: user@host, or just user'''
     rawv = fmt_by_attr(fi, info)
     # If -W -r, return raw value
-    if gropt or rawv == '--':
-        return rawv
     return rawv.split('@')[0]
 
 __all__.append('fmta_init')

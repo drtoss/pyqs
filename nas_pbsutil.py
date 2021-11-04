@@ -231,6 +231,9 @@ def load_userexits(prefix):
         home = os.path.expanduser('~')
     if home is not None:
         path = os.path.join(home, '.%s_userexits' % prefix)
+        mo = re.search('userexits=([^\s]+)', conf.gdebug)
+        if mo:
+            path = mo.group(1)
         try:
             sbuf = os.stat(path)
             if sbuf:

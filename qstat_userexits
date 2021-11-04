@@ -18,8 +18,6 @@ else:
 
     # Define routine to set default -W values
     def site_post_opts(gbl, lcl):
-        pbs_conf = conf.pbs_conf
-        server = pbs_conf.pbs_server_name.split('.')[0]
         default_W = lcl['default_W']
         default_W.extend(['NAS'])
         default_W.extend(['node_detail', 'model'])
