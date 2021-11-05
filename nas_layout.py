@@ -1,8 +1,12 @@
 #!/usr/bin/python3
 """
+The layout module takes rows of lists of column values and produces
+a list of lines where the columns line up. It performs justification
+and truncation along the way.
 """
 
-def layout(config, rows, skip = 0, show_hdr = True):
+
+def layout(config, rows, skip=0, show_hdr=True):
     '''Layout data for printing
 
     Given a configuration and a list of rows of field values,
@@ -90,12 +94,13 @@ def layout(config, rows, skip = 0, show_hdr = True):
             fs = config.config[i]
             if fs.suppress:
                 continue
-            fval = layout_field(fs.rj, fs.rf, colw[i], row[skip+i], fs.rt)
+            fval = layout_field(fs.rj, fs.rf, colw[i], row[skip + i], fs.rt)
             line += sep + fval
             sep = fs.rs
         result.append(line)
 
     return result
+
 
 class Config(object):
     def __init__(self):
@@ -103,30 +108,32 @@ class Config(object):
 
     class fieldspec(object):
         def __init__(self, title, df='-', dj=None, ds=None, dt='',
-            hf=' ', hj='l', hs=None, ht=None,
-            ident=None, maxw=-1, minw=0,
-            rf=None, rj=None, rs=None, rt=None, suppress=False):
+                     hf=' ', hj='l', hs=None, ht=None,
+                     ident=None, maxw=-1, minw=0,
+                     rf=None, rj=None, rs=None, rt=None, suppress=False):
 
             # Set contingent defaults
-            if hs == None:
+            if hs is None:
                 if maxw == 0:
                     hs = ''
                 else:
                     hs = ' '
-            if dj == None:
+            if dj is None:
                 dj = hj
-            if ds == None:
+            if ds is None:
                 ds = hs
-            if dt == None:
+            if dt is None:
                 dt = ht
-            if rf == None:
+            if rf is None:
                 rf = hf
-            if rj == None:
+            if rj is None:
                 rj = hj
-            if rs == None:
+            if rs is None:
                 rs = hs
-            if rt == None:
+            if rt is None:
                 rt = ht
+            if ident is None:
+                ident = title
             self.title = title
             self.df = df
             self.dj = dj
@@ -217,7 +224,8 @@ class Config(object):
         Returns: A list of title pieces in same structure
         as data rows.
         '''
-        cnt = max([1 if (isinstance(x.title, str) or x.suppress) else len(x.title) for x in self.config])
+        cnt = max([1 if (isinstance(x.title, str) or x.suppress) else
+                  len(x.title) for x in self.config])
         new_titles = list()
         for fs in self.config:
             tl = fs.title
@@ -232,7 +240,7 @@ class Config(object):
             rows.append(flds)
         return rows
 
-    def layout_max(self, colw, rows, skip = 0):
+    def layout_max(self, colw, rows, skip=0):
         '''Compute max widths needed for each column
 
         Args:
@@ -247,9 +255,10 @@ class Config(object):
             colw.append(0)
         for row in rows:
             for i in range(fldcnt):
-                t = len(row[i+skip])
+                t = len(row[i + skip])
                 if t > colw[i]:
                     colw[i] = t
+
 
 def layout_field(just, fill, width, value, trunc=None):
     '''layout one field's value
@@ -280,6 +289,7 @@ def layout_field(just, fill, width, value, trunc=None):
         if len(e) > n:
             e = e[0:n]
         return s[0:n - len(e)] + e
+
     def rightmost(s, n, e=None):
         if len(s) <= n:
             return s
@@ -288,24 +298,26 @@ def layout_field(just, fill, width, value, trunc=None):
         if len(e) > n:
             e = e[len(e) - n:]
         return e + s[len(s) - n + len(e):]
+
     def centermost(s, n, e=None):
         '''Return n characters from center of string'''
         sl = len(s)
         if n >= sl:
             return s
         if not e:
-            f = (sl - n) // 2
-            l = f + n
-            return s[f:l]
+            first = (sl - n) // 2
+            last = first + n
+            return s[first:last]
         if n < 2 * len(e):
             s = e + e
             sl = len(s)
-            f = (sl - n) // 2
-            l = f + n
-            return s[f:l]
-        f = (sl - n) // 2 + len(e)
-        l = f + n - 2 * len(e)
-        return e + s[f:l] + e
+            first = (sl - n) // 2
+            last = first + n
+            return s[first:last]
+        first = (sl - n) // 2 + len(e)
+        last = first + n - 2 * len(e)
+        return e + s[first:last] + e
+
     def endmost(s, n, e=None):
         '''Return n characters from ends of string'''
         sl = len(s)
@@ -322,7 +334,8 @@ def layout_field(just, fill, width, value, trunc=None):
         return ''
     # Determine how much fill is needed
     vlen = len(value)
-    if (fill == ''): fill = ' ' # Protect from empty fill
+    if (fill == ''):
+        fill = ' '              # Protect from empty fill
     fplen = len(fill)           # Len of fill pattern
     flen = width - vlen         # Amount of fill needed
     # Convert lr justification to either l or r based on value
@@ -363,6 +376,7 @@ def layout_field(just, fill, width, value, trunc=None):
             rfill = rightmost(filler, flen)
     return lfill + result + rfill
 
+
 def test():
     print(layout_field('l', '--', 10, 'abc', '*'))
     print(layout_field('l', '--', 5, 'abcdefg'))
@@ -388,26 +402,24 @@ def test():
 
     c = Config()
     c.add_field('fld1')
-    c.add_field('fld2', maxw = 3, hj = 'r', hs = '|', rf = '0')
-    c.add_field(['fld3', 'cont'], df = '+=', hj = 'r', hs = '')
-    c.add_field('fld4', maxw = 0)
-    r = layout(c, [['tom', '0', 'one', 'hidden'], ['dick', '1', 'two', ''],
-        ['harry', '1234', 'three', 'boo']])
+    c.add_field('fld2', maxw=3, hj='r', hs='|', rf='0')
+    c.add_field(['fld3', 'cont'], ident='fld3', df='+=', hj='r', hs='')
+    c.add_field('fld4', maxw=0)
+    data = [['tom', '0', 'one', 'hidden'], ['dick', '1', 'two', ''],
+            ['harry', '1234', 'three', 'boo']]
+    r = layout(c, data)
     print('\n'.join(r))
-    print(repr(r))
     print()
-    # Check that we can suppress a field
+    print("Check that we can suppress field 2")
     c.change_fieldspec('fld2', suppress=1)
-    r = layout(c, [['tom', '0', 'one', 'hidden'], ['dick', '1', 'two', ''],
-        ['harry', '1234', 'three', 'boo']])
+    r = layout(c, data)
     print('\n'.join(r))
     print()
-    # Check that we can suppress a multi-line title field, and that we
-    # can change maxw, etc.
-    c.change_fieldspec(['fld3', 'cont'], suppress=1)
-    c.change_fieldspec('fld4', maxw=999)
-    r = layout(c, [['tom', '0', 'one', 'hidden'], ['dick', '1', 'two', ''],
-        ['harry', '1234', 'three', 'boo']])
+    print("Check that we can suppress a multi-line title field (fld3)\n"
+          "and that we can change maxw up from 0 (fld4)")
+    c.change_fieldspec('fld3', suppress=1)
+    c.change_fieldspec('fld4', maxw=10)
+    r = layout(c, data)
     print('\n'.join(r))
 
 

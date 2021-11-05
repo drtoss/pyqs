@@ -1,12 +1,17 @@
 #!/usr/bin/python3 -I
 
+
+# Because this program might be run as root, or with
+# a random environment, check for some conditions that
+# might cause security issues.
+
 def check_perms():
-    '''Because this program might be run as root, or with
-    a random environment, check for some conditions that
-    might cause security issues.
-    '''
-    import sys, os, stat
+    import sys
+    import os
+    import stat
     user = os.getuid()
+    if user == 1000:
+        user = 501  # XXX Hack for VirtualBox under MacOS
     # First, clean up python search path by removing
     # dodgy entries.
     newp = []
@@ -26,7 +31,7 @@ def check_perms():
             continue
         # Skip things that others can modify
         mode = stat.S_IMODE(sb.st_mode)
-        if (mode & (stat.S_IWGRP|stat.S_IWOTH)):
+        if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
             continue
         if x not in newp:
             newp.append(x)
@@ -52,10 +57,15 @@ def check_perms():
             t = os.path.abspath(t)
             if t not in sys.path:
                 sys.path.insert(0, t)
-            continue
-        sb = os.stat(path)
-        if sb.st_uid != 0 and user != sb.st_uid:
-            raise OSError("Unsafe PYTHONPATH")
+        if "' from '" in src:
+            # Reject things that others can modify
+            sb = os.stat(path)
+            if sb.st_uid != 0 and user != sb.st_uid:
+                raise OSError("Unsafe PYTHONPATH with " + path)
+            mode = stat.S_IMODE(sb.st_mode)
+            if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
+                raise OSError("Unsafe PYTHONPATH with " + path)
+
 
 check_perms()
 
@@ -75,12 +85,12 @@ from nas_utils import *
 from nas_pbsutil import *
 import nas_layout as layout
 import nas_field_format
-from nas_field_format import NAS_field_format,gen_field
+from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
 
 long_desc = '''Display information about reservations
 
 This command displays information about PBS reservations. It is similar
-to pbs_rstat, but accepts field selections similarly to NAS's qstat.
+to pbs_rstat, but accepts field selections similarly to NAS's nas_qstat.
 '''
 
 gdebug = []
@@ -88,33 +98,37 @@ gdebug = []
 conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
 version = "0.2.2"
 
+
 def main():
     global version, gdebug
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, signal.NSIG):
         try:
             signal.signal(i, signal.SIG_DFL)
-        except:
+        except OSError:
             pass
     prog = sys.argv[0].split('/')[-1]
-    parser = argparse.ArgumentParser(description=long_desc, prog=prog,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=long_desc, prog=prog,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument('-B', default=False, action='store_true',
-        help='brief output: just reservation IDs')
+                        help='brief output: just reservation IDs')
     parser.add_argument('-F', default=False, action='store_true',
-        help='request full details')
+                        help='request full details')
     parser.add_argument('-S', default=False, action='store_true',
-        help='request short output (default)')
+                        help='request short output (default)')
     parser.add_argument('--debug', default=[], action='append',
-        help='Debugging arguments (for developers)')
+                        help='Debugging arguments (for developers)')
     parser.add_argument('--verbose', '-v', default=0, action='count',
-        help='increase debugging verbosity')
+                        help='increase debugging verbosity')
     parser.add_argument('--version', action='version',
-        version='%(prog)s ' + version)
-    parser.add_argument('-W', action='append', metavar='display option',
-        help='options affecting field selection and disply. See qstat.1B')
+                        version='%(prog)s ' + version)
+    parser.add_argument('-W', action='append', metavar='display_option',
+                        help='options affecting field selection and display.'
+                        ' See nas_qstat.1')
     parser.add_argument('resvids', nargs=argparse.REMAINDER,
-        help='reservations to list')
+                        help='reservations to list')
 
     args = conf.args = parser.parse_args()
     conf.verbose = verbose = args.verbose
@@ -124,12 +138,16 @@ def main():
         print("Cannot get PBS configuration information", file=sys.stderr)
         return 1
 
-    default_fields = ['name', 'queue', 'user', 'state', 'start', 'duration', 'end']
+    default_fields = ['name', 'queue', 'user', 'state', 'start', 'duration',
+                      'end']
     conf.verbose = args.verbose
     levels = 0
-    if args.B: levels += 1
-    if args.F: levels += 1
-    if args.S: levels += 1
+    if args.B:
+        levels += 1
+    if args.F:
+        levels += 1
+    if args.S:
+        levels += 1
     if (levels > 1):
         print("Use only one of B, F, S, f", file=sys.stderr)
         return 1
@@ -148,9 +166,14 @@ def main():
     if more_code:
         prog = compile(more_code, 'userexit code', 'exec')
         exec(prog, globals(), locals())
+    default_W = []
     userexit_post_opts(globals(), locals())
+    opts_W[0:0] = default_W
+    known_fields = gen_field_list()
+    # Scan opts_W for on-the-fly field defs
+    define_on_the_fly(known_fields, opts_W)
     fmtr = NAS_field_format(default_fields)
-    fmtr.known_fields = gen_field_list()
+    fmtr.known_fields = known_fields
     userexit_add_fields(globals(), locals())
     # Handle -W options
     (field_list, attr_list, errs) = fmtr.collect_fields()
@@ -159,19 +182,20 @@ def main():
         if field_list is None:
             print('\n'.join(errs))
             return 0
-        print(errs, file = sys.stderr)
+        print(errs, file=sys.stderr)
     rc = fmtr.adjust_formats(field_list)
-    if rc != True:
+    if rc is not True:
         print(rc, file=sys.stderr)
         return 1
     fmtr.field_list = field_list
     nas_field_format.set_field_vars(opts_W)
     # Decide if will be filtering based on execution host
     host_patt = check_W_str('host')
-    if host_patt == None:
+    if host_patt is None:
         host_patt = check_W_str('hosts')
     if host_patt:
-        host_re = re.compile(r'\b('+host_patt.replace(',','|')+r')\b', re.I)
+        host_re = re.compile(r'\b(' + host_patt.replace(',', '|') + r')\b',
+                             re.I)
     else:
         host_re = None
     conf.host_re = host_re
@@ -182,7 +206,7 @@ def main():
         attr_list = None
     # Collect the info
     resvs = get_resv_info(args.resvids, attr_list)
-    if resvs == None:
+    if resvs is None:
         sys.exit(1)
     userexit_post_statresv(globals(), locals())
     # Display it
@@ -193,6 +217,7 @@ def main():
     else:
         display_standard(resvs, fmtr)
     return 0
+
 
 def display_brief(resvs, fmtr):
     '''Display brief output.
@@ -205,6 +230,7 @@ def display_brief(resvs, fmtr):
     for resv in resvs:
         resvid = resv['id']
         print("Resv ID:", resvid)
+
 
 def display_full(resvs, fmtr):
     '''Display full output.
@@ -231,6 +257,7 @@ def display_full(resvs, fmtr):
                 value = decode_epoch_full(value)
             print(key, '=', value)
         print()
+
 
 def display_standard(resvs, fmtr):
     '''Output info in standard format
@@ -260,6 +287,7 @@ def display_standard(resvs, fmtr):
         res = layout.layout(c, rows, show_hdr=show_hdr)
         print('\n'.join([x.rstrip() for x in res]))
 
+
 def gen_field_list():
     '''Generate list of known fields
 
@@ -274,20 +302,30 @@ def gen_field_list():
     fl.append(gen_field('name', 'Name', None, 'fmt_by_attr', 'Reserve_Name'))
     fl.append(gen_field('queue', 'Queue', None, 'fmt_by_name', 'queue'))
     fl.append(gen_field('user', 'User', None, 'fmt_user', 'Reserve_Owner'))
-    fl.append(gen_field('state', 'State', None, 'fmt_resv_state', 'reserve_state'))
-    fl.append(gen_field('start', 'Start', {'hj':'r'}, 'fmt_date', 'reserve_start'))
-    fl.append(gen_field('duration', 'Duration', {'hj':'r'}, 'fmt_duration', 'reserve_duration'))
+    fl.append(gen_field('state', 'State', None, 'fmt_resv_state',
+                        'reserve_state'))
+    fl.append(gen_field('start', 'Start', {'hj': 'r'}, 'fmt_date',
+                        'reserve_start'))
+    fl.append(gen_field('duration', 'Duration', {'hj': 'r'}, 'fmt_duration',
+                        'reserve_duration'))
     fl.append(gen_field('end', 'End', None, 'fmt_date', 'reserve_end'))
-    fl.append(gen_field('groups', 'Groups', None, 'fmt_by_attr', 'Authorized_Groups'))
-    fl.append(gen_field('users', 'Users', None, 'fmt_by_attr', 'Authorized_Users'))
+    fl.append(gen_field('groups', 'Groups', None, 'fmt_by_attr',
+                        'Authorized_Groups'))
+    fl.append(gen_field('users', 'Users', None, 'fmt_by_attr',
+                        'Authorized_Users'))
     fl.append(gen_field('nodes', 'Nodes', None, 'fmt_nodes', 'resv_nodes'))
-    fl.append(gen_field('reserved', 'Reserved', None, 'fmt_by_attr', 'resv_nodes'))
-    fl.append(gen_field('select', 'Select', None, 'fmt_by_name', 'Resource_List'))
-    fl.append(gen_field('sselect', 'SSelect', None, 'fmt_by_attr', 'schedselect'))
-    fl.append(gen_field('nodect', 'Nodect', {'hj': 'r'}, 'fmt_by_name', 'Resource_List'))
+    fl.append(gen_field('reserved', 'Reserved', None, 'fmt_by_attr',
+                        'resv_nodes'))
+    fl.append(gen_field('select', 'Select', None, 'fmt_by_name',
+                        'Resource_List'))
+    fl.append(gen_field('sselect', 'SSelect', None, 'fmt_by_attr',
+                        'schedselect'))
+    fl.append(gen_field('nodect', 'Nodect', {'hj': 'r'}, 'fmt_by_name',
+                        'Resource_List'))
     fl.append(gen_field('model', 'Model', None, 'fmt_model', 'schedselect'))
     fl.append(gen_field('id', 'Resv ID', None, 'fmt_id', None))
     return fl
+
 
 def get_resv_info(resvids, attr_list):
     '''Ask server for info about reservations
@@ -299,50 +337,50 @@ def get_resv_info(resvids, attr_list):
         List of PBS batchstatus results
     '''
     bu = BatchUtils()
-    if attr_list != None:
+    if attr_list is not None:
         attr_list = (','.join(attr_list)).split(',')
         atl = bu.list_to_attrl(list(attr_list))
     else:
         atl = None
     bs = list()
     conn = None
-    if resvids == None or len(resvids) == 0:
+    if resvids is None or len(resvids) == 0:
         bs = file_to_stat(pbs_conf.pbs_server_name, 'resvs', attr_list)
-        if bs == None:
+        if bs is None:
             # Ask for all reservations
             conn = ifl.pbs_connect(None)
             if conn < 0:
                 print("Cannot connect to PBS server: %s" %
-                    os.strerror(ifl.get_pbs_errno()),
-                    file = sys.stderr)
+                      os.strerror(ifl.get_pbs_errno()),
+                      file=sys.stderr)
                 return None
             bs = ifl.pbs_statresv(conn, None, atl, None)
     else:
         cur_server = None
         for resid in resvids:
             (seq_no, server) = get_server(resid)
-            if seq_no == None and server == None:
+            if seq_no is None and server is None:
                 print("Invalid request id:", resid, file=sys.stderr)
                 continue
-            if server == None:
+            if server is None:
                 server = pbs_conf.pbs_server_name
             bs1 = file_to_stat(server, 'resvs', attr_list)
-            if bs1 == None:
+            if bs1 is None:
                 if server != cur_server:
-                    if conn != None:
+                    if conn is not None:
                         ifl.pbs_disconnect(conn)
                         cur_server = None
                     conn = ifl.pbs_connect(server)
                     if conn < 0:
-                        print("Cannot connect to PBS server %s: %s" % \
-                            (server, os.strerror(ifl.get_pbs_errno())))
+                        print("Cannot connect to PBS server %s: %s" %
+                              (server, os.strerror(ifl.get_pbs_errno())))
                         break
                     cur_server = server
                 bs1 = ifl.pbs_statresv(conn, seq_no, atl, None)
             if conf.verbose > 1:
                 print(bs1)
             bs.extend(bs1)
-    if conn != None and conn >= 0:
+    if conn is not None and conn >= 0:
         ifl.pbs_disconnect(conn)
     # If filtering by host, keep only interesting reservations
     if conf.host_re:
@@ -356,13 +394,14 @@ def get_resv_info(resvids, attr_list):
             newbs.append(resv)
         bs = newbs
     if conf.verbose > 1:
-        print (bs)
+        print(bs)
     return bs
+
 
 def check_W_str(name, default=''):
     namee = name + '='
     # Last match decides, so search backward
-    for idx in range(len(conf.opts_W)-1, -1, -1):
+    for idx in range(len(conf.opts_W) - 1, -1, -1):
         wopt = conf.opts_W[idx]
         # Option by itself is default
         if wopt == name:
@@ -373,6 +412,7 @@ def check_W_str(name, default=''):
         val = wopt[len(namee):]
         return val
     return default
+
 
 if __name__ == '__main__':
     sys.exit(main())

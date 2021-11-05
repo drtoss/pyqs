@@ -63,10 +63,10 @@ def get_server(job_id):
 
 
 patt = \
-        r'((?P<seq>[0-9]+)(?P<idx>\[[0-9]*\])?)?' \
-        r'(\.(?P<parent>[^\s@]+))?' \
-        r'(@(?P<current>[^\s@]+))?' \
-        r'$'
+    r'((?P<seq>[0-9]+)(?P<idx>\[[0-9]*\])?)?' \
+    r'(\.(?P<parent>[^\s@]+))?' \
+    r'(@(?P<current>[^\s@]+))?' \
+    r'$'
 comp = re.compile(patt)
 
 
@@ -108,6 +108,7 @@ def parse_jobid(job_id):
 
     return (seq_num, parent, current, array_idx, resv_type)
 
+
 def file_to_stat(host, stat, attrs=[]):
     '''Load faked PBS statXXX results from file
 
@@ -127,7 +128,7 @@ def file_to_stat(host, stat, attrs=[]):
         None if there isn't any appropriate fake file specified.
         Else a dictionary with the attributes and values.
     '''
-    mo = re.search('fake_%s_%s=([^\s]+)' % (stat, host), conf.gdebug)
+    mo = re.search(r'fake_%s_%s=([^\s]+)' % (stat, host), conf.gdebug)
     if not mo:
         return None
     fname = mo.group(1)
@@ -146,6 +147,7 @@ def file_to_stat(host, stat, attrs=[]):
         lines = fd.read()
         bs = lines_to_stat(lines, attrs if lst is None else lst)
     return bs
+
 
 def lines_to_stat(lines, attrs=[]):
     '''Convert file contents to PBS statXXX result
@@ -206,7 +208,8 @@ def load_userexits(prefix):
     '''
     code = ''
     user = os.getuid()
-    if user == 1000: user = 501 # XXX for debugging on MacOS
+    if user == 1000:
+        user = 501  # XXX for debugging on MacOS
     # Load system userexit, if present.
     pbs_exec = pbs_conf.pbs_exec_path
     t = os.environ.get('NAS_QSTAT_EXEC')
@@ -220,7 +223,7 @@ def load_userexits(prefix):
             if sbuf:
                 if sbuf.st_uid == 0 or sbuf.st_uid == user:
                     mode = stat.S_ISDIR(sbuf.st_mode)
-                    if (mode & (stat.S_IWGRP|stat.S_IWOTH)) == 0:
+                    if (mode & (stat.S_IWGRP | stat.S_IWOTH)) == 0:
                         with open(path) as f:
                             code += f.read()
         except OSError:
@@ -231,7 +234,7 @@ def load_userexits(prefix):
         home = os.path.expanduser('~')
     if home is not None:
         path = os.path.join(home, '.%s_userexits' % prefix)
-        mo = re.search('userexits=([^\s]+)', conf.gdebug)
+        mo = re.search(r'userexits=([^\s]+)', conf.gdebug)
         if mo:
             path = mo.group(1)
         try:
@@ -239,7 +242,7 @@ def load_userexits(prefix):
             if sbuf:
                 if sbuf.st_uid == 0 or sbuf.st_uid == user:
                     mode = stat.S_ISDIR(sbuf.st_mode)
-                    if (mode & (stat.S_IWGRP|stat.S_IWOTH)) == 0:
+                    if (mode & (stat.S_IWGRP | stat.S_IWOTH)) == 0:
                         with open(path) as f:
                             code += f.read()
         except OSError:
@@ -310,6 +313,6 @@ userexits_header = 'global %s\n' % ','.join(
         'userexit_set_server',
         'userexit_post_statresv'
     ]
-    )
+)
 
 # vi:ts=4:sw=4:expandtab
