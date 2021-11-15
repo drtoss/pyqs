@@ -113,14 +113,13 @@ on the fly) without modifying the base code.
 So, if you are interested, you can fetch the work in progress
 here. For now, you’ll need to modify the ‘build\_pbs\_ifl’ script to tell
 it where to find swig and where to find the OpenPBS source tree. This
-script builds the pbs\_ifl module using pieces that are normally part of
-PTL. It also creates nas\_utils.py as a subset of the BatchUtils class
-in PTL.
+script builds the pbs\_ifl module to give python access to PBS's IFL
+routines.
 
 Pieces:
 * nas\_field\_format.py -- Functions to compute string values for fields
 * nas\_layout.py -- The layout engine that handles field justification, widths, headers, etc.
-* nas\_pbsutil.py -- Python versions of C routines used by C qstat
+* nas\_pbsutil.py -- Interfaces to PBS not supplied by pbs\_ifl.i
 * nas\_qstat -- Main routine of python qstat
 * nas\_qstat.1 -- Man page for nas\_qstat
 * nas\_qstat\_userexits.3 -- Man page for nas\_qstat user exit callouts
@@ -133,32 +132,30 @@ The build\_pbs\_ifl script creates these files:
 * pbs\_ifl.py -- Python module for access to PBS IFL library
 * \_pbs\_ifl.so -- Loadable code for pbs\_ifl.py
 
-The file prof.out is the pstats output from profiling an earlier nas\_qstat
-on a host with 38,000 jobs.
-
-I am particularly interested in code speedups. For example, on the host
-with 38k jobs (active and in history), OpenPBS qstat takes 0.75 second,
-whereas an earlier python qstat takes 2.5 seconds. (The TCL qstat takes
-~20 seconds, so this version is already better than what NAS has been
-using.)
+I am particularly interested in suggestions for code speedups. For
+example, on the host with 38k jobs (active and in history), OpenPBS
+qstat takes 0.75 second, whereas python qstat takes 2.5 seconds. (The
+TCL qstat takes ~20 seconds, so this version is already better than what
+NAS has been using.)
 
 # INSTALLATION #
 Assume you want to install this under PBS\_EXEC/unsupported. First, create
 appropriate subdirectories there and copy the pieces in.
 ```
  umask 022 # Make sure everyone has access
- mkdir -p PBS_EXEC/unsupported/bin
- mkdir -p PBS_EXEC/unsupported/man
- mkdir -p PBS_EXEC/unsupported/man/man1
- mkdir -p PBS_EXEC/unsupported/man/man3
+ source /etc/pbs.conf # Or set PBS_EXEC directly
+ mkdir -p $PBS_EXEC/unsupported/bin
+ mkdir -p $PBS_EXEC/unsupported/man
+ mkdir -p $PBS_EXEC/unsupported/man/man1
+ mkdir -p $PBS_EXEC/unsupported/man/man3
 
- cp *.py nas_qstat nas_rstat _pbs_ifl.so PBS_EXEC/unsupported/bin/
- cp nas_qstat.1 PBS_EXEC/man/man1/
- cp nas_qstat_userexits.3 PBS_EXEC/man/man3/
+ cp *.py nas_qstat nas_rstat _pbs_ifl.so $PBS_EXEC/unsupported/bin/
+ cp nas_qstat.1 $PBS_EXEC/man/man1/
+ cp nas_qstat_userexits.3 $PBS_EXEC/man/man3/
 ```
 Now, make a copy of qstat\_userexits and modify it as appropriate
 for your site. Install that with:
 ```
- mkdir -p PBS_EXEC/lib/site
- cp qstat_userexits_copy PBS_EXEC/lib/site/qstat_userexits
+ mkdir -p $PBS_EXEC/lib/site
+ cp qstat_userexits_copy $PBS_EXEC/lib/site/qstat_userexits
 ```

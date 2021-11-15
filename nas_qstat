@@ -89,7 +89,6 @@ if check_perms():
     import time
 
     import pbs_ifl as ifl
-    from nas_utils import BatchUtils
     from nas_pbsutil import *
     import nas_layout as layout
     import nas_field_format
@@ -276,7 +275,6 @@ def main():
         attr_list.add('Job_Owner')
         attr_list.add('Job_Name')
     # Build list of attributes we need to ask for.
-    bu = BatchUtils()
     attr_list = (','.join(attr_list)).split(',')
     while '' in attr_list:
         attr_list.remove('')
@@ -285,11 +283,11 @@ def main():
     # An empty attribute list is rejected. For servers and queues, just
     # ask for everything. For jobs, ask for something easy.
     if len(attr_list) > 0:
-        atl = bu.list_to_attrl(attr_list)
+        atl = list_to_attrl(attr_list)
     else:
         if do_jobs:
             t = ['job_state']
-            atl = bu.list_to_attrl(t)
+            atl = list_to_attrl(t)
         else:
             atl = None
     fmtr.atl = atl
@@ -348,8 +346,7 @@ def display_jobs(args, fmtr):
         cfg.add_field(title, ident=fld['name'], **fld['format'])
     # Gather data from server
     server_conn = {'': None, None: None}
-    bu = BatchUtils()
-    sel_attr = bu.dict_to_attropl(selects, ifl.EQ)
+    sel_attr = dict_to_attropl(selects, ifl.EQ)
     things = args.things
     errcnt = 0
     if len(things) == 0:
@@ -787,7 +784,6 @@ def cache_server(server, conn):
     sname = server.split('.')[0]
     if sname in gserver_info:
         return gserver_info[sname]
-    bu = BatchUtils()
     bs = file_to_stat(sname, 'server')
     if bs is None:
         bs = ifl.pbs_statserver(conn, None, None)
@@ -799,7 +795,7 @@ def cache_server(server, conn):
     atrs = ['reserve_end', 'reserve_start']
     resv_info = file_to_stat(sname, 'resvs', atrs)
     if resv_info is None:
-        atrl = bu.list_to_attrl(atrs)
+        atrl = list_to_attrl(atrs)
         resv_info = ifl.pbs_statresv(conn, None, atrl, None)
     info['resv_info'] = resv_info
     return info
@@ -942,7 +938,6 @@ def display_server_hdr(server, conn, args, opts_W):
             ninfo_idx = idx
         idx += 1
     # If server is in promising state, collect info about each MoM
-    bu = BatchUtils()
     mom_info = info.get('mom_info', None)
     if (mom_info is None):
         state = info.get('server_state', '')
@@ -950,7 +945,7 @@ def display_server_hdr(server, conn, args, opts_W):
             attr_list = (','.join(attr_set)).split(',')
             while '' in attr_list:
                 attr_list.remove('')
-            atl = None if len(attr_list) == 0 else bu.list_to_attrl(attr_list)
+            atl = None if len(attr_list) == 0 else list_to_attrl(attr_list)
             mom_info = file_to_stat(sname, 'vnodes', attr_list)
             if mom_info is None:
                 if conn is not None:

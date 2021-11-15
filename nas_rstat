@@ -90,7 +90,6 @@ if check_perms():
 
     import nas_xstat_config as conf
     import pbs_ifl as ifl
-    from nas_utils import *
     from nas_pbsutil import *
     import nas_layout as layout
     import nas_field_format
@@ -339,10 +338,9 @@ def get_resv_info(resvids, attr_list):
     Returns:
         List of PBS batchstatus results
     '''
-    bu = BatchUtils()
     if attr_list is not None:
         attr_list = (','.join(attr_list)).split(',')
-        atl = bu.list_to_attrl(list(attr_list))
+        atl = list_to_attrl(list(attr_list))
     else:
         atl = None
     bs = list()

@@ -84,7 +84,7 @@
 %{
 #include "pbs_ifl.h"
 #include "pbs_error.h"
-#include "my_config.h"
+#include "my_pbsconf.h"
 %}
 
 /* functions to acquire values from thread specific variables */
@@ -103,4 +103,4 @@ const char * get_pbs_server(void)
 
 %include "pbs_ifl.h"
 %include "pbs_error.h"
-%include "my_config.h"
+%include "my_pbsconf.h"

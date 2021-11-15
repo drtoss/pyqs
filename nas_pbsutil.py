@@ -1,4 +1,6 @@
-from __future__ import print_function
+'''
+Miscellaneous routines to interact with PBS
+'''
 
 import re
 import pbs_ifl as ifl
@@ -8,6 +10,8 @@ import stat
 import sys
 
 import nas_xstat_config as conf
+import pbs_ifl as ifl
+from collections import OrderedDict
 
 pbs_conf = ifl.cvar.pbs_conf
 
@@ -314,5 +318,174 @@ userexits_header = 'global %s\n' % ','.join(
         'userexit_post_statresv'
     ]
 )
+
+# Utility functions copied from PTL's BatchUtils class
+
+def list_to_attrl(l):
+    """
+    Convert a list to a PBS attribute list
+
+    :param l: List to be converted
+    :type l: List
+    :returns: PBS attribute list
+    """
+    return list_to_attropl(l, None)
+
+def list_to_attropl(l, op=ifl.SET):
+    """
+    Convert a list to a PBS attribute operation list
+
+    :param l: List to be converted
+    :type l: List
+    :returns: PBS attribute operation list
+    """
+    head = None
+    prev = None
+
+    for i in l:
+        a = str_to_attropl(i, op)
+        if prev is None:
+            head = a
+        else:
+            prev.next = a
+        prev = a
+        if op is not None:
+            a.op = op
+    return head
+
+def str_to_attrl(s):
+    """
+    Convert a string to a PBS attribute list
+
+    :param s: String to be converted
+    :type s: str
+    :returns: PBS attribute list
+    """
+    return str_to_attropl(s, None)
+
+def str_to_attropl(s, op=ifl.SET):
+    """
+    Convert a string to a PBS attribute operation list
+
+    :param s: String to be converted
+    :type s: str
+    :returns: PBS attribute operation list
+    """
+    if op is not None:
+        a = ifl.attropl()
+    else:
+        a = ifl.attrl()
+    if '.' in s:
+        (attribute, resource) = s.split('.')
+        a.name = attribute
+        a.resource = resource.strip()
+    else:
+        a.name = s
+    a.value = ''
+    a.next = None
+    if op:
+        a.op = op
+    return a
+
+def dict_to_attrl(d={}):
+    """
+    Convert a dictionary to a PBS attribute list
+
+    :param d: Dictionary to be converted
+    :type d: Dictionary
+    :returns: PBS attribute list
+    """
+    return dict_to_attropl(d, None)
+
+def dict_to_attropl(d={}, op=ifl.SET):
+    """
+    Convert a dictionary to a PBS attribute operation list
+
+    :param d: Dictionary to be converted
+    :type d: Dictionary
+    :returns: PBS attribute operation list
+    """
+    if len(d.keys()) == 0:
+        return None
+
+    prev = None
+    head = None
+
+    for k, v in d.items():
+        if isinstance(v, tuple):
+            op = v[0]
+            v = v[1]
+        if op is not None:
+            a = ifl.attropl()
+        else:
+            a = ifl.attrl()
+        if '.' in k:
+            (attribute, resource) = k.split('.')
+            a.name = attribute
+            a.resource = resource
+        else:
+            a.name = k
+        a.value = str(v)
+        if op is not None:
+            a.op = op
+        a.next = None
+
+        if prev is None:
+            head = a
+        else:
+            prev.next = a
+        prev = a
+    return head
+
+def convert_to_attrl(attrib):
+    """
+    Generic call to convert Python type to PBS attribute list
+
+    :param attrib: Attributes to be converted
+    :type attrib: List or tuple or dictionary or str
+    :returns: PBS attribute list
+    """
+    return convert_to_attropl(attrib, None)
+
+def convert_to_attropl(attrib, cmd=ifl.MGR_CMD_SET, op=None):
+    """
+    Generic call to convert Python type to PBS attribute
+    operation list
+
+    :param attrib: Attributes to be converted
+    :type attrib: List or tuple or dictionary or str
+    :returns: PBS attribute operation list
+    """
+    if op is None:
+        op = command_to_op(cmd)
+
+    if isinstance(attrib, (list, tuple)):
+        a = list_to_attropl(attrib, op)
+    elif isinstance(attrib, (dict, OrderedDict)):
+        a = dict_to_attropl(attrib, op)
+    elif isinstance(attrib, str):
+        a = str_to_attropl(attrib, op)
+    else:
+        a = None
+    return a
+
+def command_to_op(cmd=None):
+    """
+    Map command to a ``SET`` or ``UNSET`` Operation. An unrecognized
+    command will return SET. No command will return None.
+
+    :param cmd: Command to be mapped
+    :type cmd: str
+    :returns: ``SET`` or ``UNSET`` operation for the command
+    """
+
+    if cmd is None:
+        return None
+    if cmd in (ifl.MGR_CMD_SET, ifl.MGR_CMD_EXPORT, ifl.MGR_CMD_IMPORT):
+        return ifl.SET
+    if cmd == ifl.MGR_CMD_UNSET:
+        return ifl.UNSET
+    return ifl.SET
+
 
 # vi:ts=4:sw=4:expandtab
