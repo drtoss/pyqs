@@ -1,9 +1,17 @@
 #!/usr/bin/python3 -I
 
+'''
+Display information about PBS jobs, queues, or servers
+
+This command displays information about PBS jobs, queues, or servers,
+writing the status to standard output. It is similar to OpenPBS's qstat, but
+provides more options for selecting and formatting the output.
+'''
 
 # Because this program might be run as root, or with
 # a random environment, check for some conditions that
 # might cause security issues.
+
 
 def check_perms():
     import sys
@@ -16,7 +24,7 @@ def check_perms():
     # dodgy entries.
     newp = []
     for x in sys.path:
-        if x is '':
+        if x == '':
             continue
         try:
             sb = os.stat(x)
@@ -65,32 +73,29 @@ def check_perms():
             mode = stat.S_IMODE(sb.st_mode)
             if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
                 raise OSError("Unsafe PYTHONPATH for " + path)
+    return True
 
 
-check_perms()
+if check_perms():
+    # These imports are indented this way just to avoid gripes from
+    # PEP-8 checkers.
+    import sys
+    import os
+    import argparse
+    import re
+    import subprocess
+    import signal
+    import socket
+    import time
 
-import sys
-import os
-import argparse
-import re
-import subprocess
-import signal
-import socket
-import time
+    import pbs_ifl as ifl
+    from nas_utils import BatchUtils
+    from nas_pbsutil import *
+    import nas_layout as layout
+    import nas_field_format
+    from nas_field_format import *
 
-import pbs_ifl as ifl
-from nas_utils import BatchUtils
-from nas_pbsutil import *
-import nas_layout as layout
-import nas_field_format
-from nas_field_format import *
-
-long_desc = '''Display information about jobs, queues, or servers
-
-This command displays information about PBS jobs, queues, or servers,
-writing the status to standard output. It is similar to OpenPBS's qstat, but
-provides more options for selecting and formatting the output.
-'''
+long_desc = __doc__
 
 args = None
 gNAS = False
@@ -361,7 +366,7 @@ def display_jobs(args, fmtr):
         is_jobs = False
         if thing[0] not in '123456789':
             # Server or queue
-            if thing[0] is '@':
+            if thing[0] == '@':
                 queue = None
                 names = [thing]
                 current_server = thing[1:]
@@ -619,16 +624,14 @@ def display_queues(args, fmtr):
     global opts_W
 
     cfg = layout.Config()
-    idx = 0
     state_count_idx = -1
-    for fld in fmtr.field_list:
+    for idx, fld in enumerate(fmtr.field_list):
         title = fld['title']
         if not title:
             title = fld['name']
         cfg.add_field(title, ident=fld['name'], **fld['format'])
         if fld['func'] == 'fmt_state_count':
             state_count_idx = idx
-        idx += 1
     rows = []
     info = []
     # Get info about queues
@@ -673,10 +676,8 @@ def display_queues(args, fmtr):
         scounts = pretty_state_counts(info)
         fs = cfg.config[state_count_idx]
         fs.title[1] = scounts[0]
-        idx = 1
-        for svr in info:
+        for idx, svr in enumerate(info):
             svr['pretty_sc'] = scounts[idx]
-            idx += 1
     for svr in info:
         row = list()
         for f in fmtr.field_list:
@@ -1011,6 +1012,7 @@ def display_server_hdr(server, conn, args, opts_W):
     userexit_last_chance_a(globals(), locals())
     # Layout result
     if len(nrows) > 0:
+        new_section()
         rows = layout.layout(cfg, nrows)
         for r in rows:
             print(' ', r.rstrip())

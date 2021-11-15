@@ -1,9 +1,15 @@
 #!/usr/bin/python3 -I
 
+'''Display information about reservations
+
+This command displays information about PBS reservations. It is similar
+to pbs_rstat, but accepts field selections similarly to nas_qstat.
+'''
 
 # Because this program might be run as root, or with
 # a random environment, check for some conditions that
 # might cause security issues.
+
 
 def check_perms():
     import sys
@@ -16,7 +22,7 @@ def check_perms():
     # dodgy entries.
     newp = []
     for x in sys.path:
-        if x is '':
+        if x == '':
             continue
         try:
             sb = os.stat(x)
@@ -57,6 +63,7 @@ def check_perms():
             t = os.path.abspath(t)
             if t not in sys.path:
                 sys.path.insert(0, t)
+            continue
         if "' from '" in src:
             # Reject things that others can modify
             sb = os.stat(path)
@@ -65,38 +72,34 @@ def check_perms():
             mode = stat.S_IMODE(sb.st_mode)
             if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
                 raise OSError("Unsafe PYTHONPATH with " + path)
+    return True
 
 
-check_perms()
+if check_perms():
+    # These imports are indented this way just to avoid gripes from
+    # PEP-8 checkers.
+    import sys
+    import os
+    import argparse
+    import re
+    import signal
+    import socket
+    import stat
+    import subprocess
+    import time
 
-import sys
-import os
-import argparse
-import re
-import signal
-import socket
-import stat
-import subprocess
-import time
+    import nas_xstat_config as conf
+    import pbs_ifl as ifl
+    from nas_utils import *
+    from nas_pbsutil import *
+    import nas_layout as layout
+    import nas_field_format
+    from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
 
-import nas_xstat_config as conf
-import pbs_ifl as ifl
-from nas_utils import *
-from nas_pbsutil import *
-import nas_layout as layout
-import nas_field_format
-from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
-
-long_desc = '''Display information about reservations
-
-This command displays information about PBS reservations. It is similar
-to pbs_rstat, but accepts field selections similarly to NAS's nas_qstat.
-'''
-
+long_desc = __doc__
 gdebug = []
-
 conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
-version = "0.2.2"
+version = "0.2.3"
 
 
 def main():
