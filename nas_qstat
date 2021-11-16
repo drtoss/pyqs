@@ -919,6 +919,8 @@ def display_server_hdr(server, conn, args, opts_W):
         print(errs, file=sys.stderr)
     if check_W_bool('node_comments', False):
         attr_set.add('comment')
+    if check_W_str('condense_vnodes'):
+        attr_set.add('resources_available')
     # Adjust formatting of selected fields, per -W fmta_xxx values
     fmtr.field_list = field_list
     rc = fmtr.adjust_formats(field_list)
@@ -1453,7 +1455,7 @@ def condense_vnode_info(nodes):
     new_list = list()
     ignore_states = set(['free', 'job-exclusive', 'job-busy'])
     for ninfo in sorted(nodes, key=cmpf):
-        cur_name = ninfo.get('Mom', '').split('.')[0]
+        cur_name = ninfo.get('resources_available.host', '').split('.')[0]
         if cur_name != nat_name:
             # New Mom, flush condensed node info to new list
             if nat_info:
