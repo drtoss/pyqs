@@ -64,7 +64,7 @@ Display memory sizes in 8 byte megawords.
 .TP
 .B -Q
 Display status for PBS queues. Destination operands are queue names at the
-default server. Queues at others servers can be specified as
+default server. Queues at other servers can be specified as
 .IR "queue_name@server" .
 
 .TP
@@ -107,7 +107,9 @@ job history).
 
 .TP
 .BI --debug " option"
-Debugging options for developers. See DEBUG OPTIONS section.
+Debugging options for developers. See
+.B "DEBUG OPTIONS"
+section.
 .SS -W OPTIONS
 The
 .B -W
@@ -188,7 +190,9 @@ space, unless
 .TP
 .B maxw:
 (max\ width) Maximum width of column.
-If not set, nas_qstat picks a width that accommodates all values.
+If not set,
+.B nas_qstat
+picks a width that accommodates all values.
 
 .TP
 .B minw:
@@ -204,7 +208,8 @@ If not set, nas_qstat picks a width that accommodates all values.
 (row\ just) Justification to apply to data values (default
 .BR hj ).
 See
-.B hj for values.
+.B hj
+for values.
 
 .TP
 .B rs:
@@ -221,8 +226,9 @@ See
 Set to True to suppress column from output. This is different
 from
 .B o=-name
-in that the latter removes the field everywhere, whereas the
-former can be used to enable or disable the field on a
+in that the latter removes the field everywhere, whereas
+.B suppress
+can be used to enable or disable the field on a
 server by server basis.
 
 .TP
@@ -248,10 +254,11 @@ described above, except applied to the fields in the
 node output.
 
 .TP
-.BI condense_vnodes=host[,host...]
+.BI condense_vnodes= host[,host...]
 If the PBS server appears in the comma-separated list of hosts,
 then nodes with multiple vnodes should be summarized in the
-.B \-a output.
+.B \-a
+output.
 That is, when a vnode agrees with the
 natural vnode in queue and vntype, and when its state is
 similar to the natural vnode's state, then sum the vnode's
@@ -291,7 +298,7 @@ node status display.
 
 .TP
 .BI node_bin_total= nnn
-When generating the node information at the beginning of the
+When generating the node information for the
 .B -a
 output,
 if there are
@@ -342,22 +349,24 @@ If the list is prefixed with '-', the given fields are removed from the display 
 If the list is prefixed with '+', the given fields are appended to the display list.
 Specifying
 .RB ' o=? '
-requests nas_qstat to list the currently known fields and then exit.
+requests
+.B nas_qstat
+to list the currently known fields and then exit.
 The known fields can be changed by the site administrator or by the user.
 The current list is acct, aoe, cnt, cpct, cput, ctime, eff, elapwallt, eligtime, eligwait, estend, eststart, exitstatus, group, jobid, jobname, lifetime, maxwallt, memory, minwallt, mission, model, nds, place, pmem, pri, qtime, queue, rank0, reqid, reqmem, remwallt, reqdwallt, runs, s, sessid, seqno, ss, stime, tsk, user, vmem.
 
-If the attribute or resource you are interested in is not in the known
-field list, you request it by using a field name of 'A_xyz', 'RL_xyz',
-or 'RU_xyz'. The 'A_' prefix indicates a job attribute; 'RL_' is for
-a quantity from the job 'Resource_List' attribute; and 'RU_' refers
-to 'resources_used' by running or completed jobs.
+If the attribute or resource of interest is not in the known
+field list, it can be requested by using a field name of 'A_xyz', 'RL_xyz',
+or 'RU_xyz'.
 The
 .I 'xyz'
-portion of the field name must be typed exactly as it appears
-in qstat -f output.
+portion of the field name specifies the attribute or resource,
+and must be typed exactly as it appears in qstat -f output.
+The 'A_' prefix indicates a job attribute; 'RL_' is for
+a quantity from the job 'Resource_List' attribute; and 'RU_' refers
+to 'resources_used' by running or completed jobs.
 
-So, for example, if you want to include the Rerunable attribute for jobs,
-you could use
+So, for example, to include the Rerunable attribute for jobs, use
 .RE 1
 .in 0
 .EX
@@ -370,7 +379,7 @@ JobID         User     Queue Jobname CPUs Nds wallt S wallt Eff Rerunable
 
 .EE
 .RS
-If you want to see how much walltime was used, the following works:
+To see how much walltime was used, the following works:
 .RE 1
 .in 0
 .EX
@@ -383,9 +392,10 @@ JobID         User     Queue Jobname CPUs Nds wallt S wallt Eff walltime
 
 .EE
 .RS
-If you want to change how these fields are formatted, you can use the
+To change how these fields are formatted, use the
 usual -W fmt_name= method, where the field name includes the prefix. E.g.,
 .B "-W fmt_A_Rerunable=maxw:5".
+.RE
 .TP
 .BI oa= [+-]field_list
 Like
@@ -396,9 +406,11 @@ output.
 The current list of known fields is host, cpus, cused, cfree, gpus, gused, gfree, mem, mused, mfree, state, tasks, jobs, ninfo.
 
 As with
-.B o=
-you can add to this list using special names for the fields. In this case, 'A_xyz', 'RA_xyz', or 'RI_xyz'. The 'A_' prefix selects a node attribute; 'RA_'
-selects a resources_available quantity; and 'RI_' selects resources_assigned (in use).
+.BR o= ,
+fields can be added to this list using special names for the fields. In
+this case, 'A_xyz', 'RA_xyz', or 'RI_xyz'. The 'A_' prefix selects a
+node attribute; 'RA_' selects a resources_available quantity; and 'RI_'
+selects resources_assigned ("In use").
 
 .SH EXIT STATUS
 Normally returns 0. Returns 1 on errors (e.g., nonexistent queue or jobid).
@@ -450,9 +462,13 @@ options, or to otherwise customize
 .B nas_qstat
 output.
 
-See the nas_qstat_userexits man page for more information.
+See the
+.B nas_qstat_userexits
+man page for more information.
 
-See the EXAMPLE USEREXITS section for examples.
+See the
+.B "EXAMPLE USEREXITS"
+section for examples.
 .SH EXAMPLES
 .sp
 Show running jobs.
@@ -528,7 +544,7 @@ JobID      User     Queue Jobname TSK Nds wallt S  wallt Eff
 8.server2  dtalcott playq STDIN     1   1 00:03 H  00:00  --
 .EE
 .SH EXAMPLE USEREXITS
-This example shows a
+This first example shows a
 .I qstat_userexits
 file that a site might install in
 .I PBS_EXEC/lib/site
@@ -544,7 +560,7 @@ options default.
 # Enable NAS-specific features
 globals()['gNAS'] = True
 
-# Possibly do different things based on whether we are statusing hosts,
+# Possibly do different things based on whether we are statusing servers,
 # queues, or jobs
 if args.B:
     pass
@@ -643,7 +659,9 @@ normally queries PBS servers for information. However,
 during development, it is useful to have a constant set of data to
 work with, or data from servers that are not available to the
 developers.
-So, nas_qstat supports supplying data from text files instead of
+So,
+.B nas_qstat
+supports supplying data from text files instead of
 from a server. The name of the debug option gives the pbs_statxxx
 call to be faked and for which server.
 .RS
@@ -674,7 +692,7 @@ information for server
 .RE
 Thus,
 .B "--debug=fake_jobs_pbspl4=faked_jobs.txt"
-says to read jobs status information for host pbspl4 from the file faked_jobs.txt.
+says to read jobs status information for server pbspl4 from the file faked_jobs.txt.
 .sp
 .SH SEE ALSO
 nas_qstat_userexits(3)
