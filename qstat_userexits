@@ -1,0 +1,47 @@
+# Enable NAS-specific features
+globals()['gNAS'] = True
+
+# Possibly do different things based on whether we are statusing servers,
+# queues, or jobs
+if args.B:
+    pass
+elif args.Q:
+    pass
+else:
+    # We add ngpus to default field list, if not already there
+    if 'gpus' not in default_fields:
+        try:
+            t = default_fields.index('cpus')
+        except:
+            t = len(default_fields) - 1
+        default_fields.insert(t+1, 'gpus')
+
+    # Define routine to set default -W values
+    def site_post_opts(gbl, lcl):
+        default_W = lcl['default_W']
+        default_W.extend(['NAS'])
+        default_W.extend(['node_detail', 'model'])
+        default_W.extend(['fmt_jobname=maxw:20 hj:e ht:...'])
+        default_W.extend(['condense_vnodes=pbspl4,server2'])
+
+    userexit_post_opts = stack_userexit(userexit_post_opts, site_post_opts)
+
+    # Define routine to tweak outputs based on server
+    def site_set_server(g, lcl):
+        server_name = lcl['current_server'].split('.')[0]
+        cfg = lcl['cfg']
+        svr_hdr = lcl.get('in_server_header', False)
+        showgpu = server_name in ['pbspl4', 'server2']
+        if svr_hdr:
+            # Enable/disable all GPU fields in -a node output
+            node_detail = lcl.get('node_detail', False)
+            cfg.change_fieldspec('gpus', suppress=not showgpu or node_detail)
+            cfg.change_fieldspec('gused', suppress=not showgpu or not node_detail)
+            cfg.change_fieldspec('gfree', suppress=not showgpu or not node_detail)
+        else:
+            # Enable/disable job GPU column
+            cfg.change_fieldspec('gpus', suppress=not showgpu)
+
+    userexit_set_server = stack_userexit(userexit_set_server, site_set_server)
+
+# vi:ts=4:sw=4:expandtab:syntax=python

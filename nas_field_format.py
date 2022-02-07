@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 '''
 Module that encapsulates all the information needed by layout routines
 to format columnar fields.
@@ -14,168 +13,180 @@ import re
 import time
 import math
 
+import nas_xstat_config as conf
+
+__all__ = list()
+
+__all__.append('NAS_field_format')
+
+
 class NAS_field_format(object):
 
-  def __init__(self, default_fields, verbose = False, opts_W = None):
-    ''' Create new display formatter
+    def __init__(self, default_fields, pfx=None):
+        ''' Create new display formatter
 
-    The arguments are saved away for later use.
+        The arguments are saved away for later use.
 
-    Args:
-        default_fields = List of names of default fields
-        verbose = boolean to enable extra debugging output
-        opts_W = List of -W command line arguments that affect formatting
-    '''
-    self.default_fields = default_fields
-    self.verbose = verbose
-    self.W = opts_W
-    self.known_fields = []
-    self.field_list = []
+        Args:
+            default_fields = List of names of default fields
+            pfx = prefix for opts_W arguments of interest, default "fmt_"
+        '''
+        self.default_fields = default_fields
+        self.pfx = pfx if pfx else 'fmt'
+        self.known_fields = []
+        self.field_list = []
 
-  def adjust_formats(self, fl, optW=None):
-    '''Adjust layout options for fields
+    def adjust_formats(self, fl):
+        '''Adjust layout options for fields
 
-    Take a list of field_info dictionaries and modify the layout parameters
-    from the -W options. The options we are interested in look like:
-    fmt_xxx="key:value key:value"
+        Take a list of field_info dictionaries and modify the layout parameters
+        from the -W options. The options we are interested in look like:
+        fmt_xxx="key:value key:value"
 
-    Args:
-        fl = list of field_info data
-        optW = list of -W options, default is W instance var
-    Returns: True if no errors, else error messages
-    '''
+        Args:
+            fl = list of field_info data
+        Returns: True if no errors, else error messages
+        '''
 
-    errlist = []
-    valid_keys = ('title',
-            'df', 'dj', 'ds', 'dt',
-            'hf', 'hj', 'hs', 'ht',
-            'maxw', 'minw',
-            'rf', 'rj', 'rs', 'rt', 'suppress'
-            )
-    if optW == None:
-        optW = self.W
-    for wopt in optW:
-        # Is it our kind of W option?
-        mo = re.match(r'fmt_(\w+)=(.+)', wopt)
-        if not mo:
-            continue
-        # Do we care about it?
-        name = mo.group(1)
-        for i in range(len(fl)):
-            if fl[i]['name'] == name:
-                idx = i
-                break
-        else:
-            continue
-        # Parse formatting options (key:value key:value)
-        opt_str = mo.group(2).strip()
-        opts = []
-        while opt_str != '':
-            mo = re.match(r'(\w+)[:=]\s*([^ ]*)(.*)', opt_str)
+        errlist = []
+        valid_keys = ('title',
+                      'df', 'dj', 'ds', 'dt',
+                      'hf', 'hj', 'hs', 'ht',
+                      'maxw', 'minw',
+                      'rf', 'rj', 'rs', 'rt', 'suppress'
+                      )
+        opt_re = re.compile(self.pfx + r'_(\w+)=(.+)')
+        for wopt in conf.opts_W:
+            # Is it our kind of W option?
+            mo = opt_re.match(wopt)
             if not mo:
-                errlist.append("Garbage in format spec for %s: %s" % \
-                    (name, opt_str))
-                break
-            key = mo.group(1)
-            value = mo.group(2)
-            opt_str = mo.group(3)
-            opt_str = opt_str.strip() if opt_str else ''
-            # Validate keys. There's probably a better place to do this.
-            if not key in valid_keys:
-                errlist.append("Unknown formatting spec for field %s: %s" % \
-                    (name, key))
-                errlist.append("Valid specs are: " + ", ".join(valid_keys))
-                break
-            opts.append((key, value))
-        # Ignore if parse problem
-        if opt_str != '':
-            continue
-        # Update field list format with new values
-        for (key, value) in opts:
-            if key == 'title':
-                # Might need to convert title to multi-line list
-                title = re.sub(r'\\n','\n',value)
-                if title != value:
-                    title = title.split('\n')
-                fl[idx]['title'] = title
-            elif key in ['minw', 'maxw']:
-                fl[idx]['format'][key] = int(value)
-            elif key in ['suppress']:
-                fl[idx]['format'][key] = bool(value)
+                continue
+            # Do we care about it?
+            name = mo.group(1)
+            for i in range(len(fl)):
+                if fl[i]['name'] == name:
+                    idx = i
+                    break
             else:
-                # Handle special names for hard to input values
-                if value == '""' or value == "''":
-                    value = ''
-                elif value == 'space':
-                    value = ' '
-                elif value == 'tab' or value == '\\t':
-                    value = '\t'
-                fl[idx]['format'][key] = value
-    if errlist:
-        return '\n'.join(errlist)
-    return True
+                continue
+            # Parse formatting options (key:value key:value)
+            opt_str = mo.group(2).strip()
+            opts = []
+            while opt_str != '':
+                mo = re.match(r'(\w+)[:=]\s*([^ ]*)(.*)', opt_str)
+                if not mo:
+                    errlist.append("Garbage in format spec for %s: %s" %
+                                   (name, opt_str))
+                    break
+                key = mo.group(1)
+                value = mo.group(2)
+                opt_str = mo.group(3)
+                opt_str = opt_str.strip() if opt_str else ''
+                # Validate keys. There's probably a better place to do this.
+                if key not in valid_keys:
+                    errlist.append("Unknown formatting spec for field %s: %s" %
+                                   (name, key))
+                    errlist.append("Valid specs are: " + ", ".join(valid_keys))
+                    break
+                opts.append((key, value))
+            # Ignore if parse problem
+            if opt_str != '':
+                continue
+            # Update field list format with new values
+            for (key, value) in opts:
+                if key == 'title':
+                    # Replace \_ with space
+                    value.replace(r'\_', ' ')
+                    # Might need to convert title to multi-line list
+                    title = re.sub(r'\\n', '\n', value)
+                    if title != value:
+                        title = title.split('\n')
+                    fl[idx]['title'] = title
+                elif key in ['minw', 'maxw']:
+                    fl[idx]['format'][key] = int(value)
+                elif key in ['suppress']:
+                    fl[idx]['format'][key] = bool(value)
+                else:
+                    # Handle special names for hard to input values
+                    if value == '""' or value == "''":
+                        value = ''
+                    elif value == 'space':
+                        value = ' '
+                    elif value == 'tab' or value == '\\t':
+                        value = '\t'
+                    fl[idx]['format'][key] = value
+        if errlist:
+            return '\n'.join(errlist)
+        return True
 
-  def collect_fields(self):
-    '''Generate list of fields
+    def collect_fields(self, tag='o'):
+        '''Generate list of fields
 
-    Instance vars:
-        default_fields = List of default field names
-        known_fields = List of info about known fields
-    Returns:
-        (fl, aset, msg) where
-L           fl = list of field_info dictionaries describing field selected
-                for display
-            aset = set of PBS attributes holding data for fields in fl
-            msg = Text of any errors, None if no errors
-    '''
-    fl = self.default_fields
-    W = self.W
-    errlist = []
-    if W is None:
-        W = []
-    for opt in W:
-        # Check for request to list fields
-        if opt == 'o=?':
-            names = [x['name'] for x in self.known_fields]
-            errlist.append("Known fields: " + ', '.join(names))
-            return (None, None, errlist)
-        # Only interested in changes to list of fields
-        mo = re.match(r'o=([+-]?)(.*)', opt)
-        if not mo:
-            continue
-        plusminus = mo.group(1)
-        names = mo.group(2).split(',')
-        if plusminus == '':
-            fl = [n.strip() for n in names]
-        elif plusminus == '-':
-            for name in names:
-                name = name.strip()
-                while name in fl:
-                    fl.remove(name)
-        else:
-            for name in names:
-                fl.append(name.strip())
-    # Now, validate fields and constuct results
-    knownmap = dict([[x['name'], x] for x in self.known_fields])
-    knowns = set(knownmap.keys())
-    requested = set(fl)
-    unknowns = requested.difference(knowns)
-    if unknowns:
-        plural = 's' if len(unknowns) > 1 else ''
-        errlist.append("Unknown field name%s: %s" % (plural, ', '.join(sorted(unknowns))))
-        errlist.append("Known fields are: %s" % ', '.join(sorted(knowns)))
-    fil = [knownmap[x] for x in fl if x in knownmap]
-    alist = list()
-    for x in fil:
-        t = x['sources']
-        if t:
-            alist.extend(t)
-    aset = set(alist)
-    if self.verbose:
-        print("Need these attributes: %s" % ', '.join(sorted(aset)))
-    return (fil, aset, '\n'.join(errlist) if errlist else None)
+        Args:
+            tag = -W variable to introduce changes to field list. default o=
+        Instance vars:
+            default_fields = List of default field names
+            known_fields = List of info about known fields
+        Returns:
+            (fl, aset, msg) where
+                fl = list of field_info dictionaries describing field selected
+                    for display
+                aset = set of PBS attributes holding data for fields in fl
+                msg = Text of any errors, None if no errors
+        '''
+        fl = self.default_fields
+        W = conf.opts_W
+        errlist = []
+        if W is None:
+            W = []
+        for opt in W:
+            # Check for request to list fields
+            if opt == tag + '=?':
+                names = [x['name'] for x in self.known_fields]
+                errlist.append("Known fields: " + ', '.join(names))
+                return (None, None, errlist)
+            # Only interested in changes to list of fields
+            mo = re.match(tag + r'=([+-]?)(.*)', opt)
+            if not mo:
+                continue
+            plusminus = mo.group(1)
+            names = mo.group(2).split(',')
+            if plusminus == '':
+                fl = [n.strip() for n in names]
+            elif plusminus == '-':
+                for name in names:
+                    name = name.strip()
+                    while name in fl:
+                        fl.remove(name)
+            else:
+                for name in names:
+                    fl.append(name.strip())
+        # Now, validate fields and constuct results
+        knownmap = dict([[x['name'], x] for x in self.known_fields])
+        knowns = set(knownmap.keys())
+        requested = set(fl)
+        unknowns = requested.difference(knowns)
+        if unknowns:
+            plural = 's' if len(unknowns) > 1 else ''
+            errlist.append("Unknown field name%s: %s" %
+                           (plural, ', '.join(sorted(unknowns))))
+            errlist.append("Known fields are: %s" % ', '.join(sorted(knowns)))
+        fil = [knownmap[x] for x in fl if x in knownmap]
+        alist = list()
+        for x in fil:
+            t = x['sources']
+            if t:
+                alist.extend(t)
+        aset = set(alist)
+        if conf.verbose:
+            print("Need these attributes: %s" % ', '.join(sorted(aset)))
+        return (fil, aset, '\n'.join(errlist) if errlist else None)
 
-def gen_field(name, title, form, func, source, opt=None):
+
+__all__.append('gen_field')
+
+
+def gen_field(name, title, form, func, source, opt=''):
     '''Create a field_info dict
 
     Args:
@@ -196,15 +207,19 @@ def gen_field(name, title, form, func, source, opt=None):
     if source is None:
         source = ''
     fi = {'name': name,
-        'title': title,
-        'format': form,
-        'func': func,
-        'sources': source.split() if source else None,
-        'opt': opt
-        }
+          'title': title,
+          'format': form,
+          'func': func,
+          'sources': source.split() if source else None,
+          'opt': opt.split()
+          }
     return fi
 
 # Module global values
+
+
+__all__.append('set_field_vars')
+
 
 def set_field_vars(opts):
     ''' Set global options from command line arguments
@@ -212,16 +227,18 @@ def set_field_vars(opts):
     That is, certain command line arguments affect the formatting for
     multiple field types. Check for and remember those arguments.
     '''
-    global gnow, gropt, gszunits, ghuman
+    global gnow, gszunits, ghuman
 
     # gszunits = units for display of sizes
     gszunits = 'G' if 'G' in opts else 'M' if 'M' in opts else 'b'
     # ghuman = True to use human readable
-    ghuman = '-H' in opts or 'human' in opts or gszunits != 'b'
+    ghuman = check_W_bool('human') or gszunits != 'b'
     # gnow = current epoch time
-    gnow = int(time.time())
-    # gropt = True if -W raw for raw values
-    gropt = '-r' in opts or 'raw' in opts
+    gnow = conf.gNow
+
+
+__all__.append('set_entity_map')
+
 
 def set_entity_map(themap):
     '''Save reference to entity map
@@ -233,19 +250,20 @@ def set_entity_map(themap):
     gshare_entity_info = themap
 
 # Functions to compute specific values for display
-# fmt_xxx(fi, info, opts)
+# fmt_xxx(fi, info)
 # Args:
 #   fi = field info
 #   info = dict with info for job/reservation
-#   opts = dict of formatting options
 
-def fmt_by_attr(fi, info, opts):
+
+def fmt_by_attr(fi, info):
     t = fi['sources']
     attr_name = t[0] if t else None
-    return fmt_by_name(fi, info, opts, attr_name)
+    return fmt_by_name(fi, info, attr_name)
 
-def fmt_by_name(fi, info, opts, name=None):
-    if name == None:
+
+def fmt_by_name(fi, info, name=None):
+    if name is None:
         name = fi['name']
     if name in info:
         result = info[name]
@@ -257,41 +275,52 @@ def fmt_by_name(fi, info, opts, name=None):
             result = '--'
     return result
 
-def fmt_aoe(fi, info, opts):
-    rawv = fmt_by_attr(fi, info, opts)
+
+def fmt_aoe(fi, info):
+    rawv = fmt_by_attr(fi, info)
     mo = re.search(r'\baoe=(\w+)', rawv)
     if (mo):
         return mo.group(1)
     return '--'
 
-def fmt_comment(fi, info, opts):
-    rawv = fmt_by_attr(fi, info, opts)
-    if gropt or rawv == '--':
-        return rawv
-    t = str.maketrans(' \t\n\r', '____')
-    return rawv.translate(t)
 
-def fmt_date(fi, info, opts):
-    rawv = fmt_by_attr(fi, info, opts)
-    if gropt or rawv == '--':
-        return rawv
-    result = time.strftime(r'%y-%m-%d/%H:%M', time.localtime(int(rawv)))
+subst_white_space = str.maketrans(' \t\n\r', '____')
+
+
+def fmt_comment(fi, info):
+    rawv = fmt_by_attr(fi, info)
+    return rawv.translate(subst_white_space)
+
+
+def fmt_date(fi, info):
+    rawv = fmt_by_attr(fi, info)
+    if rawv.isdigit():
+        t = time.localtime(int(rawv))
+    else:
+        if rawv == '--':
+            return rawv
+        t = time.strptime(rawv)
+    return time.strftime(r'%y-%m-%d/%H:%M', t)
+
+
+def fmt_date_full(fi, info):
+    rawv = fmt_by_attr(fi, info)
+    if rawv.isdigit():
+        t = time.localtime(int(rawv))
+    else:
+        if rawv == '--':
+            return rawv
+        t = time.strptime(rawv)
+    result = time.strftime(r'%c', t)
     return result
 
-def fmt_date_full(fi, info, opts):
-    rawv = fmt_by_attr(fi, info, opts)
-    if gropt or rawv == '--':
-        return rawv
-    result = time.strftime(r'%c', time.localtime(int(rawv)))
-    return result
-    
-def fmt_duration(fi, info, opts):
-    rawv = fmt_by_attr(fi, info, opts)
-    if gropt or rawv == '--':
-        return rawv
+
+def fmt_duration(fi, info):
+    rawv = fmt_by_attr(fi, info)
     return secstoclock(int(rawv))
 
-def fmt_efficiency(fi, info, opts):
+
+def fmt_efficiency(fi, info):
     ncpus = info.get('resources_used.ncpus')
     cpu_pct = info.get('resources_used.cpupercent')
     if not ncpus or not cpu_pct or ncpus == "0":
@@ -312,45 +341,47 @@ def fmt_efficiency(fi, info, opts):
                 eff = effc
     return "%.0f%%" % eff
 
-def fmt_elapsed(fi, info, opts):
+
+def fmt_elapsed(fi, info):
     state = info.get('job_state', '?')
     if state in 'RSBEFX':
         rawv = info.get('resources_used.walltime', '--')
-        if gropt or rawv == '--':
-            return rawv
         return secstoclock(clocktosecs(rawv), False, ghuman)
     etime = info.get('etime', gnow)
     t = gnow - int(etime)
     return secstoclock(t, False, ghuman)
 
-def fmt_elig_time(fi, info, opts):
+
+def fmt_elig_time(fi, info):
     rawv = info.get('eligible_time', '--')
     return secstoclock(clocktosecs(rawv), False, ghuman)
 
-def fmt_est_end(fi, info, opts):
+
+def fmt_est_end(fi, info):
     guess = ''
     start = info.get('stime', None)
-    if start == None:
+    if start is None:
         start = info.get('estimated.start_time', None)
         guess = '?'
-    if start == None:
+    if start is None:
         return '--'
     start = int(start)
     walltime = None
     jobstate = info.get('job_state', '?')
     if jobstate == "F":
         walltime = info.get('resources_used.walltime', None)
-    if walltime == None:
+    if walltime is None:
         walltime = info.get('Resource_List.walltime', None)
-    if walltime == None:
+    if walltime is None:
         return '--'
     wtime = clocktosecs(walltime)
-    t = time.strftime(r'%y-%m-%d/%H:%M',time.localtime(start + wtime))
+    t = time.strftime(r'%y-%m-%d/%H:%M', time.localtime(start + wtime))
     return t + guess
 
-def fmt_from_rsrc(fi, info, opts):
+
+def fmt_from_rsrc(fi, info):
     # Pick one item out of a resource list
-    key = fi['opt']
+    key = fi['opt'][0]
     for src in fi['sources']:
         rawv = info.get(src + '.' + key, '--')
         if rawv != '--':
@@ -359,9 +390,10 @@ def fmt_from_rsrc(fi, info, opts):
         rawv = '--'
     return rawv
 
-def fmt_from_rsrc_tm(fi, info, opts):
+
+def fmt_from_rsrc_tm(fi, info):
     # Pick one duration item out of a resource list
-    key = fi['opt']
+    key = fi['opt'][0]
     for src in fi['sources']:
         rawv = info.get(src + '.' + key, '--')
         if rawv != '--':
@@ -373,9 +405,10 @@ def fmt_from_rsrc_tm(fi, info, opts):
     t = secstoclock(clocktosecs(rawv), False, ghuman)
     return t
 
-def fmt_from_rsrc_sz(fi, info, opts):
+
+def fmt_from_rsrc_sz(fi, info):
     # Pick one size item out of a resource list
-    key = fi['opt']
+    key = fi['opt'][0]
     for src in fi['sources']:
         rawv = info.get(src + '.' + key, '--')
         if rawv != '--':
@@ -387,8 +420,9 @@ def fmt_from_rsrc_sz(fi, info, opts):
     t = ensuffix(unsuffix(rawv))
     return t
 
-def fmt_future_date(fi, info, opts):
-    rawv = fmt_from_rsrc(fi, info, opts)
+
+def fmt_future_date(fi, info):
+    rawv = fmt_from_rsrc(fi, info)
     if rawv == '--':
         return rawv
     est = int(rawv)
@@ -407,20 +441,21 @@ def fmt_future_date(fi, info, opts):
     t = time.strftime(r'%H:%M', time.localtime(eststart))
     return t
 
-def fmt_id(fi, info, opts):
+
+def fmt_id(fi, info):
     rawv = info['id']
-    if gropt or rawv == '--':
-        return rawv
     return rawv.split('.')[0]
 
-def fmt_jobid(fi, info, opts):
+
+def fmt_jobid(fi, info):
     rawv = info['id']
     t = rawv.split('.')
     if len(t) <= 1:
         return rawv
     return t[0] + '.' + t[1]
 
-def fmt_jobstate(fi, info, opts):
+
+def fmt_jobstate(fi, info):
     jobstate = info.get('job_state', None)
     holds = info.get('Hold_Types', '')
     if holds == 'n':
@@ -432,7 +467,8 @@ def fmt_jobstate(fi, info, opts):
     itv = 'I' if info.get('interactive', None) == 'True' else ''
     return jobstate + itv + holds
 
-def fmt_lifetime(fi, info, opts):
+
+def fmt_lifetime(fi, info):
     qtime = info.get('qtime', None)
     if qtime:
         jobstate = info.get('job_state', None)
@@ -448,39 +484,41 @@ def fmt_lifetime(fi, info, opts):
         t = '--'
     return t
 
-def fmt_mission(fi, info, opts):
+
+def fmt_mission(fi, info):
     global gshare_entity_info
     entity = info.get('share_entity', None)
     t = gshare_entity_info.get(entity, dict())
     leader = t.get('leader', '--')
     return leader
 
+
 modelre = re.compile(r'^(\d+)?.*\bmodel=(\w+)')
-def fmt_model(fi, info, opts):
+
+
+def fmt_model(fi, info):
     # Raw format: 4:ncpus=3:model=sky_gpu:bigmem=false
-    rawv = fmt_by_attr(fi, info, opts)
-    if gropt or rawv== '--':
-        return rawv
-    models=[]
+    rawv = fmt_by_attr(fi, info)
+    models = []
     for chunk in rawv.split('+'):
         mo = modelre.search(chunk)
         if (mo):
             count = mo.group(1)
-            if count == None:
+            if count is None:
                 continue
             models.append(count + ':' + mo.group(2))
     if models:
         return '+'.join(models)
     return '--'
 
-def fmt_name(fi, info, opts):
-    return fmt_by_attr(fi, info, opts)
 
-def fmt_nodes(fi, info, opts):
+def fmt_name(fi, info):
+    return fmt_by_attr(fi, info)
+
+
+def fmt_nodes(fi, info):
     # Raw format:  (r789i0n4:ncpus=1)+(r789i0n5:ncpus=1)
-    rawv = fmt_by_attr(fi, info, opts)
-    if gropt or rawv == '--':
-        return rawv
+    rawv = fmt_by_attr(fi, info)
     items = rawv.split('+')
     nodes = list()
     for item in items:
@@ -489,12 +527,14 @@ def fmt_nodes(fi, info, opts):
             nodes.append(mo.group(1))
     return ",".join(nodes)
 
-def fmt_no_space(fi, info, opts):
+
+def fmt_no_space(fi, info):
     # Reformat so value won't get split by awk, etc.
-    rawv = fmt_by_attr(fi, info, opts)
+    rawv = fmt_by_attr(fi, info)
     return re.sub(r'\s+', '_', rawv)
 
-def fmt_queue_info(fi, info, opts):
+
+def fmt_queue_info(fi, info):
     # Select interesting info about queue status
     stuff = []
     t = info.get('enabled', None)
@@ -505,19 +545,19 @@ def fmt_queue_info(fi, info, opts):
         stuff.append('stopped')
     return " ".join(stuff)
 
-def fmt_rank0(fi, info, opts):
+
+def fmt_rank0(fi, info):
     # Raw format:  node1/0+node1/1+node2/0
-    rawv = fmt_by_attr(fi, info, opts)
-    if gropt or rawv == '--':
-        return rawv
-    rank0 = rawv.split('/',1)[0]
+    rawv = fmt_by_attr(fi, info)
+    rank0 = rawv.split('/', 1)[0]
     if rank0:
         return rank0
     return '--'
 
-def fmt_remaining(fi, info, opts):
+
+def fmt_remaining(fi, info):
     req = info.get('Resource_List.walltime', None)
-    if req == None:
+    if req is None:
         return '--'
     jstate = info.get('job_state', ' ')
     if jstate in 'BERSU':
@@ -530,21 +570,24 @@ def fmt_remaining(fi, info, opts):
             rem = clocktosecs(req)
     return secstoclock(rem, False, ghuman)
 
-def fmt_resv_state(fi, info, opts):
-    rawv = fmt_by_attr(fi, info, opts)
-    if gropt or rawv == '--':
-        return rawv
-    return decode_resv_state(rawv)
 
-def fmt_seqno(fi, info, opts):
+def fmt_resv_state(fi, info):
+    rawv = fmt_by_attr(fi, info)
+    if rawv.isdigit():
+        return decode_resv_state(rawv)
+    return decode_resv_state_str(rawv)
+
+
+def fmt_seqno(fi, info):
     rawv = info.get('id', '--')
     return rawv.split('.')[0]
 
-def fmt_server_info(fi, info, opts):
+
+def fmt_server_info(fi, info):
     # Select interesting info about server status
     stuff = []
     t = info.get('server_state', None)
-    if t and not t in ['Active', 'Idle']:
+    if t and t not in ['Active', 'Idle']:
         stuff.append(t)
     t = info.get('scheduling', None)
     if t and not t == 'True':
@@ -554,22 +597,238 @@ def fmt_server_info(fi, info, opts):
         stuff.append(t)
     return " ".join(stuff)
 
-def fmt_state_count(fi, info, opts):
-    # State counts already formatted into pretty_sc attribute
+
+def fmt_state_count(fi, info):
+    '''State counts already formatted into pretty_sc attribute'''
     t = info.get('pretty_sc', '--')
     return t
 
-def fmt_user(fi, info, opts):
-    # Raw format: user@host, or just user
-    rawv = fmt_by_attr(fi, info, opts)
+
+def fmt_user(fi, info):
+    '''Raw format: user@host, or just user'''
+    rawv = fmt_by_attr(fi, info)
     # If -W -r, return raw value
-    if gropt or rawv == '--':
-        return rawv
     return rawv.split('@')[0]
+
+
+__all__.append('fmta_init')
+
+
+def fmta_init(r, s):
+    '''Save away values that might be needed by -a formatters
+
+    Args:
+        r = reservation list
+        s = userexit function to tweak interesting list
+    '''
+    global allresvs, userexit_interest
+    allresvs = r
+    userexit_interest = s
+
+
+def geta_from_rsrc(fi, info, missing=None):
+    '''Get MoM resource value from info'''
+    r = fi['sources']
+    a = fi['opt'][0]
+    result = []
+    if not a:
+        return result
+    for x in r:
+        rawv = info.get(x + '.' + a)
+        if rawv is not None:
+            result.append(rawv)
+        else:
+            result.append(missing)
+    return result
+
+
+def fmta_count(fi, info):
+    '''Countable resource'''
+    v = geta_from_rsrc(fi, info, "0")
+    if v:
+        return v[0]
+    return '0'
+
+
+def fmta_free(fi, info):
+    '''Free countable resource'''
+    v = geta_from_rsrc(fi, info, "0")
+    if len(v) == 2:
+        count = safeint(v[0])
+        used = safeint(v[1])
+        free = count - used
+    else:
+        free = 0
+    return str(free)
+
+
+def fmta_host(fi, info):
+    '''MoM identifier'''
+    return info.get('id', '??')
+
+
+def fmta_info(fi, minfo):
+    '''Format interesting info about MoM'''
+    global allresvs
+    mom_name = minfo.get('id', '??')
+    comment = minfo.get('comment', '')
+    partition = minfo.get('partition', '')
+    queue = minfo.get('queue', '')
+    resvs = [x.strip() for x in minfo.get('resv', '').split(',')]
+    state = minfo.get('state', '')
+    # Look for interesting info about MoM
+    interest = []
+    if queue != '':
+        interest.append('q=' + queue)
+    if partition != '':
+        interest.append('p=' + partition)
+    # Some NAS only items
+    if conf.gNAS and check_W_bool('model'):
+        t = minfo.get('resources_available.bigmem')
+        if t == 'True':
+            interest[0:0] = ['bigmem']
+        model = minfo.get('resources_available.model', '')
+        if model != '':
+            interest[0:0] = [model]
+    # Simplify state string
+    t = '' if 'free' in state else 'in-use'
+    state = state.replace(',', ' ')
+    new_states = []
+    is_down = False
+    is_offline = False
+    for ss in state.split(' '):
+        if ss in ['job-exclusive', 'job-busy']:
+            new_states.append(t)
+        elif ss == 'down':
+            is_down = True
+        elif ss == 'offline':
+            is_offline = True
+        # Not sure whether 'Stale' should be included in this list
+        elif ss in ['state-unknown', 'free', '<various>']:
+            pass
+        else:
+            new_states.append(ss)
+    if is_down:
+        new_states[0:0] = ['down']
+    if is_offline:
+        new_states[0:0] = ['offline']
+    state = ' '.join(new_states)
+    # Include state in interesting items
+    if state != '':
+        interest.append(state)
+    # Remove redundant down from comment
+    if is_down:
+        comment = comment.replace('node down: communication closed', '')
+    # Remove offline timestamps added by NAS
+    if conf.gNAS:
+        while True:
+            mo = re.search(r'\d\d\d\d-\d\d-\d\d \d\d:\d\d', comment)
+            if mo:
+                comment = comment[:mo.start()] + comment[mo.end():]
+            else:
+                break
+    # Check for reservations for node
+    if resvs and resvs[0] != '':
+        r = format_resvs(allresvs, mom_name, resvs, conf.gNow)
+        if r:
+            interest.append(r)
+    clist = [comment]
+    userexit_interest(globals(), locals())
+    comment = ' '.join(clist)
+    if comment:
+        interest.append(comment)
+    interest = ' '.join(interest)
+    interest = interest.replace('  ', ' ')
+    return interest
+
+
+def fmta_jcnt(fi, info):
+    '''Count number of unique jobs on node'''
+    a = fi['sources']
+    jobs = info.get(a[0])
+    jset = set()
+    if jobs:
+        for x in jobs.split(','):
+            t = x.find('/')
+            if t > -1:
+                jset.add(x[:t].strip())
+    return str(len(jset))
+
+
+def fmta_mem(fi, info):
+    '''Memory resource total or used'''
+    v = geta_from_rsrc(fi, info, "0")
+    mem = unsuffix(v[0]) if len(v) > 0 else 0.0
+    return ensuffix(mem)
+
+
+def fmta_mfree(fi, info):
+    '''Node memory free'''
+    v = geta_from_rsrc(fi, info, "0")
+    if len(v) == 2:
+        totm = unsuffix(v[0])
+        used = unsuffix(v[1])
+        free = totm - used
+    else:
+        totm = 0.0
+        free = 0.0
+    return ensuffix(free) if totm > 0.0 else '--'
+
+
+def fmta_tcnt(fi, info):
+    '''Count number of CPUs requested for all jobs on node'''
+    '''Ex:  jobs = 47244.pbspl4.nas.nasa.gov/0, 47260.pbspl4.nas.nasa.gov/9'''
+    a = fi['sources']
+    jobs = info.get(a[0])
+    if jobs:
+        result = jobs.count('/')
+    else:
+        result = 0
+    return str(result)
+
+
+def fmta_used(fi, info):
+    '''Assigned countable resource'''
+    v = geta_from_rsrc(fi, info, "0")
+    if v:
+        return v[0]
+    return "0"
 
 # Misc helper functions for formatting routines
 
+
+def check_W_bool(name, default=False):
+    '''Get boolean value from saved opts_W
+
+    Args:
+        name = nmae of option
+        default = value if option not present
+    Returns:
+        True if option present in opts_W and not set false
+        default otherwise
+    '''
+    namee = name + '='
+    # Last match decides, so search backward
+    for idx in range(len(conf.opts_W) - 1, -1, -1):
+        wopt = conf.opts_W[idx]
+        # Option by itself is True
+        if wopt == name:
+            return True
+        # Examine name=value
+        if not wopt.startswith(namee):
+            continue
+        val = wopt[len(namee):].lower()
+        if val == 't' or val == 'true' or val == '1':
+            return True
+        if val == 'f' or val == 'false' or val == '0':
+            return False
+    return default
+
+
+__all__.append('clocktosecs')
 clockre = re.compile(r'((\d+)\+)?(\d+):(\d+)(:(\d+))?$')
+
+
 def clocktosecs(v):
     '''Convert clock time string to integer seconds
 
@@ -583,28 +842,99 @@ def clocktosecs(v):
     mo = clockre.match(v)
     if not mo:
         return '--'
-    (days, hours, minutes, seconds) = mo.group(2,3,4,6)
+    (days, hours, minutes, seconds) = mo.group(2, 3, 4, 6)
     days = int(days) if days else 0
     hours = int(hours) if hours else 0
     minutes = int(minutes) if minutes else 0
     seconds = int(seconds) if seconds else 0
     return seconds + 60 * (minutes + 60 * (hours + 24 * days))
 
+
 def decode_epoch_full(rawv):
     result = time.strftime('%c', time.localtime(int(rawv)))
     return result
 
+
+_resv_states = [
+    ("--", "RESV_NONE"),
+    ("UN", "RESV_UNCONFIRMED"),
+    ("CO", "RESV_CONFIRMED"),
+    ("WT", "RESV_WAIT"),
+    ("TR", "RESV_TIME_TO_RUN"),
+    ("RN", "RESV_RUNNING"),
+    ("FN", "RESV_FINISHED"),
+    ("BD", "RESV_BEING_DELETED"),
+    ("DE", "RESV_DELETED"),
+    ("DJ", "RESV_DELETING_JOBS"),
+    ("DG", "RESV_DEGRADED"),
+    ("AL", "RESV_BEING_ALTERED"),
+    ("IC", "RESV_IN_CONFLICT")
+]
+
+
 def decode_resv_state(rawv):
-    return ("--",  "UN", "CO", "WT", "TR", "RN", "FN", "BD", "DE", "DJ", "DG", "AL", "IC")[int(rawv)]
+    return _resv_states[int(rawv)][0]
+
 
 def decode_resv_state_full(rawv):
-    return ("RESV_NONE", "RESV_UNCONFIRMED", "RESV_CONFIRMED",
-            "RESV_WAIT", "RESV_TIME_TO_RUN", "RESV_RUNNING",
-            "RESV_FINISHED", "RESV_BEING_DELETED", "RESV_DELETED",
-            "RESV_DELETING_JOBS", "RESV_DEGRADED", "RESV_BEING_ALTERED",
-            "RESV_IN_CONFLICT")[int(rawv)]
+    return _resv_states[int(rawv)][1]
 
-def ensuffix(v):
+
+def decode_resv_state_str(rawv):
+    for x in _resv_states:
+        if x[1] == rawv:
+            return x[0]
+    return '??'
+
+
+__all__.append('define_on_the_fly')
+
+
+def define_on_the_fly(cur_flds, opts_W, which='o'):
+    '''Handle on the fly field definitions
+
+    The -W o= and oa= options can define additional fields that simply
+    take their values from status attributes.
+    '''
+    # Scan opts_W for the interesting arguments
+    for key, value in [x.split('=', 1) if '=' in x else [x, '']
+                       for x in opts_W]:
+        if key != which:
+            continue
+        if value[0] in '+-':
+            value = value[1:]
+        for fld_name in value.split(','):
+            if '_' not in fld_name:
+                continue
+            pfx, name = fld_name.split('_', 1)
+            title = name.title() if name.islower() else name
+            rj = {'hj': 'r'}
+            if pfx == 'A':
+                # Simple attribute
+                new_fld = gen_field(fld_name, title, None, 'fmt_by_attr', name)
+            elif pfx == 'RA':
+                # Node resources available
+                new_fld = gen_field(fld_name, title, rj, 'fmt_from_rsrc',
+                                    'resources_available', name)
+            elif pfx == 'RI':
+                new_fld = gen_field(fld_name, title, rj, 'fmt_from_rsrc',
+                                    'resources_assigned', name)
+            elif pfx == 'RL':
+                new_fld = gen_field(fld_name, title, rj, 'fmt_from_rsrc',
+                                    'resources_used', name)
+            elif pfx == 'RU':
+                # Job resources used
+                new_fld = gen_field(fld_name, name, rj, 'fmt_from_rsrc',
+                                    'resources_used', name)
+            else:
+                continue
+            cur_flds.append(new_fld)
+
+
+__all__.append('ensuffix')
+
+
+def ensuffix(v, units=None):
     '''Scale a memory value
 
     Convert a raw byte count to the form 1234xB where x denotes
@@ -613,6 +943,7 @@ def ensuffix(v):
 
     Args:
         v = value to convert
+        units = desired suffix, else default will be used
     Returns
         String equivalent, rounded to 3-4 places with a suffix.
     '''
@@ -623,12 +954,17 @@ def ensuffix(v):
         v = 0.0 - v
     else:
         sign = 1
-    if gszunits == 'M':
+    if units is None:
+        units = gszunits
+    if units == 'M':
         factor = 8.0 * 1024 * 1024
         scale = 'MW'
-    elif gszunits == 'G':
+    elif units == 'G':
         factor = 1024.0 * 1024 * 1024
         scale = 'GB'
+    elif units == 'K':
+        factor = 1024.0
+        scale = 'KB'
     else:
         factor = 1.0
         scale = ''
@@ -637,11 +973,114 @@ def ensuffix(v):
                 break
             factor *= 1024.
             scale = t
-    t = sign * round( v / factor, 0 )
+    t = sign * round(v / factor, 0)
     t = int(t)
     if t == 0:
         return "0"
     return "%d%s" % (t, scale)
+
+
+__all__.append('format_resvs')
+
+
+def format_resvs(all_resvs, host, resv_list, now):
+    '''Get reservations affecting a host
+
+    From the list of all reservations and those that apply to a host,
+    create a string with interesting info about the reservations.
+    '''
+    end_of_interest = now + 9 * 24 * 3600
+    earliest = -1
+    missing = 0
+    rlist = []
+    for r in resv_list:
+        for resv_info in all_resvs:
+            if resv_info['id'] != r:
+                continue
+            start = safeint(resv_info['reserve_start'])
+            end = safeint(resv_info['reserve_end'])
+            if start < end_of_interest and end >= now:
+                resv_info['rstart'] = start
+                resv_info['rend'] = end
+                rlist.append(resv_info)
+            if earliest < 0 or start < earliest:
+                earliest = start
+            break
+        else:
+            missing += 1
+    if len(rlist) == 0:
+        if missing == 0:
+            return ''
+        elif missing == 1:
+            return 'reservation'
+        else:
+            return 'reservations'
+    # Decide what to do based on earliest matching reservation
+    one_day_out = now + 24 * 3600
+    six_days_out = now + 6 * 24 * 3600
+    the_time = earliest
+    if earliest > one_day_out:
+        two_weeks_out = now + 14 * 24 * 3600
+        if earliest > two_weeks_out:
+            fmt = r'Resv on %b %d'
+        elif earliest > six_days_out:
+            fmt = r'Resv next %a'
+        else:
+            fmt = r'Resv on %a'
+        return time.strftime(fmt, time.localtime(earliest))
+    if earliest > now:
+        if earliest > now + 12 * 3600:
+            fmt = r'Resv %a %H:%M'
+        else:
+            fmt = r'Resv at %H:%M'
+    else:
+        # Active reservation. Find when reservations will end
+        start = now
+        end = now
+        found = True
+        while found:
+            found = False
+            fstart = start - 30 * 60
+            fend = end + 30 * 60
+            for ri in rlist:
+                rstart = ri['rstart']
+                rend = ri['rend']
+                if rstart > fend or rend < fstart:
+                    continue
+                if rstart < start:
+                    start = rstart
+                    found = True
+                if rend > end:
+                    end = rend
+                    found = True
+        if end > one_day_out:
+            if end > six_days_out:
+                fmt = r'Resv until %b %e'
+            else:
+                fmt = r'Resv until %a %H:%M'
+        else:
+            fmt = r'Resv until %H:%M'
+        the_time = end
+    return time.strftime(fmt, time.localtime(the_time))
+
+
+def safeint(x):
+    '''Convert value to int, safely.
+
+    Args:
+        x = value to convert
+    Returns:
+        x, as integer, else 0 if cannot convert
+    '''
+    try:
+        t = int(x)
+    except Exception:
+        t = 0
+    return t
+
+
+__all__.append('secstoclock')
+
 
 def secstoclock(v, sf=False, df=False):
     '''Convert time in seconds for display
@@ -676,7 +1115,11 @@ def secstoclock(v, sf=False, df=False):
     mm = dhm % 60
     return r'%s%s%02d:%02d%s' % (sign, daypfx, hh, mm, secsuf)
 
+
+__all__.append('unsuffix')
 sizere = re.compile(r'(-?)([\d.]+)([kmgtp]?)([bw]?)$')
+
+
 def unsuffix(v):
     '''Convert a memory size value based on suffix
 
@@ -696,16 +1139,16 @@ def unsuffix(v):
     neg = mo.group(1)
     try:
         value = float(mo.group(2))
-    except:
+    except Exception:
         return v
     scale = mo.group(3)
     words = mo.group(4)
     factor = {'k': 1024.,
-            'm': 1024. * 1024,
-            'g': 1024. * 1024 * 1024,
-            't': 1024. * 1024 * 1024 * 1024,
-            'p': 1024. * 1024 * 1024 * 1024 * 1024,
-            '': 1.0}.get(scale, 1.0)
+              'm': 1024. * 1024,
+              'g': 1024. * 1024 * 1024,
+              't': 1024. * 1024 * 1024 * 1024,
+              'p': 1024. * 1024 * 1024 * 1024 * 1024,
+              '': 1.0}.get(scale, 1.0)
     if words == 'w':
         factor *= 8.0
     value *= factor

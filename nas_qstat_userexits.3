@@ -1,0 +1,558 @@
+.TH NAS_QSTAT_USEREXITS 3 "2020-05-04" Local "OpenPBS contributions"
+.SH NAME
+.B nas_qstat_userexits
+\- customize nas_qstat or nas_rstat output
+.SH SYNOPSIS
+.B userexit_add_fields(gbl, lcl)
+.br
+.B userexit_add_fields_a(gbl, lcl)
+.br
+.B userexit_interest(gbl, lcl)
+.br
+.B userexit_last_chance_a(gbl, lcl)
+.br
+.B userexit_post_opts(gbl, lcl)
+.br
+.B userexit_post_statresv(gbl, lcl)
+.br
+.B userexit_set_server(gbl, lcl)
+
+.SH DESCRIPTION
+After
+.B nas_qstat
+or
+.B nas_rstat
+have parsed their command line arguments, they read and execute any
+"userexit" files specific to that command.
+(See the nas_qstat or nas_rstat man pages for the names and locations
+of their userexit files.)
+Not all command line arguments have been processed at this point.
+In particular, the -W options have been collected, but not examined yet.
+The most common use for userexits is to introduce site or user default
+-W options, e.g., to change the default list of fields or how the fields
+are displayed.
+Userexits allow sites and users to customize
+.B nas_qstat
+without having to modify
+.B nas_qstat
+itself.
+.PP
+When the userexit files are executed, the following python
+items are available:
+.TP
+.B args
+The command line arguments as returned by
+.BR argparse .
+For most cases, this should be treated as read-only.
+The particular arguments of most interest with
+.B nas_qstat
+are
+.B args.B
+and
+.BR args.Q ,
+which are used to decide whether
+.B nas_qstat
+is displaying servers, queues, or jobs.
+This affects which versions of the userexit routines should get defined.
+.TP
+.B gdebug
+The value of the
+.B \-\-debug
+command line argument. Multiple
+.B \-\-debug
+options are joined into a single space-separated string.
+.TP
+.B verbose
+The (integer) value of the
+.B \-\-verbose
+command line argument.
+.TP
+.B stack_userexit(old, new)
+Function that creates a procedure that calls an existing userexit and
+then calls a new version of the userexit.
+The typical use is for a user-defined userexit that wants to include
+the changes provided by the site-defined version of the same userexit.
+See
+.B EXAMPLES
+section for use.
+.PP
+The userexit files generally don't make their changes directly.
+Instead, the files define procedures that are called at various
+places during nas_qstat/nas_rstat execution.
+
+.PP
+The individual userexits are called with two arguments,
+.B gbl
+and
+.B lcl
+which are the global and local symbol tables (resp.) at the point where
+the userexit is being called.
+Interesting global and local symbols are pointed out in the descriptions
+of the various userexits below.
+Some symbols that might be interesting for all userexits are:
+.TP
+.B conf.pbs_conf
+Allows access to a read-only copy of the pbs_config structure.
+Of most use is
+.BR pbs_conf.pbs_server_name ,
+which gives the hostname to
+use to contact the default PBS server for the host where
+.B nas_qstat
+is run.
+.TP
+.B conf.gNow
+The epoch time when
+.B nas_qstat
+started. Obtained via a call to
+.BR time.time() .
+.TP
+.B conf.verbose
+The verbosity as specified by
+.B \-\-verbose
+command line argument.
+
+.PP
+To understand the purposes for the various userexits, it helps to know that
+.B nas_qstat
+goes through several steps to display its information.
+First, it uses default values and information from
+.B \-W
+options to decide
+just what information it needs to query for the fields of interest.
+Next, it queries the PBS server(s) to get that information.
+Then, it takes that raw information and runs it through formatting
+routines to calculate human readable display values.
+The final step is a layout module that takes the display values for each
+field for each job/queue/node and arranges them into columns.
+.PP
+In
+.BR nas_qstat ,
+the userexits are called at the following places during execution:
+
+.TP
+.B userexit_post_opts
+Called immediately after the userexits files are read and exec'ed and before
+.B \-W
+options are examined.
+.TP
+.B userexit_add_fields
+Called after normal job display fields have been defined and just before
+.B \-W
+formatting options are examined.
+.TP
+.B userexit_set_server
+Called first after information for jobs has been queried.
+If
+.B \-a option was present, it is called again once the
+server information has been obtained, but before anything is displayed.
+.TP
+.B userexit_add_fields_a
+Called after all the node fields for the
+.B \-a
+display are defined, but before
+.BI -W fmta_field
+options are processed.
+.TP
+.B userexit_interest
+Called during
+.B \-a
+display processing when the Node Info field is being constructed.
+.TP
+.B userexit_last_chance_a
+Called for the
+.B \-a
+display after raw node data have been formatted and the rows of items
+are about to be sent to the layout routines.
+.PP
+In
+.BR nas_rstat ,
+the userexits are called at the following places during execution:
+.TP
+.B userexit_post_opts
+Called immediately after the userexits files are read and exec'ed and before
+.B \-W
+options are examined. (Same as
+.BR nas_qstat .)
+.TP
+.B userexit_add_fields
+Called after normal display fields have been defined and just before
+.B \-W
+formatting options are examined. (Same as
+.BR nas_qstat .)
+.TP
+.B userexit_post_statresv
+Called just after
+.B nas_rstat
+queries for reservations.
+
+.SH USEREXIT DETAILS
+.TP
+.B userexit_add_fields(gbl, lcl)
+This routine adds new field names and the functions that define how
+they are computed.
+It is called once, after
+.B userexit_post_opts
+and after a formatter object has been created.
+The use of
+.B userexit_add_fields
+is complicated, but see the
+.B EXAMPLES
+section for help.
+
+Interesting symbols are:
+.RS
+.TP
+.B nas_field_format
+Module whose attributes are the functions that compute field values.
+By convention the names of functions for job attributes begin with
+"fmt_" and for nodes in the
+.B \-a
+output begin with "fmta_".
+To create a new field, you define a function that is called with
+the field_info dictionary for the field and a dictionary with 
+information about the object (job, host, etc) of interest.
+The function returns the string representation of the field for
+that object.
+.TP
+.B "gen_field(name, title, form, func, source, opt)"
+Function that creates a field_info dictionary suitable for adding to
+the formatter object.
+.TP
+.B lcl['fmtr']
+The created formatter object.
+After you define a formatting function, you create a field_info dictionary
+for it and append the result to
+.B fmtr
+to make it available for displaying the field.
+.RE
+
+.TP
+.B userexit_add_fields_a(gbl, lcl)
+Similar to
+.B userexit_add_fields
+except that fields are added to the
+.B nas_qstat \-a
+output, rather than normal job, server, or queue output.
+
+.TP
+.B userexit_interest(gbl, lcl)
+The
+.B nas_qstat \-a
+output normally includes a field titled
+.I Node Info
+that includes miscellaneous information about a node (e.g., state,
+queue, comment).
+Sites or users who want to tweak what shows up there can use this routine,
+which is called for each node.
+
+Interesting symbols are:
+.RS
+.TP
+.B lcl['minfo']
+The attribute dictionary for the MoM being examined.
+.TP
+.B lcl['interest']
+The list of "interesting" items found so far.
+Each item is a string.
+The userexit can add, remove, or modify entries in this list.
+The final list, plus
+.BR clist ,
+described next,
+is joined to form the field value.
+.TP
+.B lcl['clist']
+A list, initially containing just the comment attribute of the node,
+slightly edited to remove redundant information.
+The userexit can add, remove, or modify entries in this list.
+The final list, if not empty, is joined and appended to the
+.B interest
+list.
+.RE
+
+.TP
+.B userexit_last_chance_a(gbl, lcl)
+Routine called immediately before calling
+.B layout
+to format
+.B nas_qstat \-a
+output.
+This userexit was added for a site that needed to modify the
+"Node Info" field values for sorting and summarizing, but wanted
+to restore the original values for display.
+
+Interesting symbols are:
+.RS
+.TP
+.B lcl['nrows']
+The ordered list of lists of field values for nodes.
+Each node or summarized collection of nodes has an entry in
+.BR nrows .
+The entry is a list of formatted values for the selected fields, in the
+order the fields should appear on the output.
+The userexit can edit any part of this list of lists, but the final
+field lists must all have exactly the same number of elements as there
+were on entry.
+
+.TP
+.B lcl['ninfo_idx']
+If the
+.B Node Info
+field is selected to be output, the index of that field in a node
+info row in
+.B nrows
+is given by
+.BR ninfo_idx .
+If
+.B ninfo_idx
+is -1, then the node info field is not present.
+.RE
+
+.TP
+.B userexit_set_server(gbl, lcl)
+Called in two different contexts when
+.B nas_qstat
+is displaying job info.
+It is first called once
+.B nas_qstat
+determines which server is the next one whose jobs are of interest, but
+before the job info is actually requested.
+It is next called if
+.B \-a
+output is requested and after vnode info for the server is collected.
+.sp
+.B userexit_set_server
+is often used to enable/disable fields in the output based on whether
+those fields apply to specific servers.
+Due to a limitation in
+.BR nas_qstat ,
+.B userexit_set_server
+cannot add or remove fields.
+(The formatter object is already defined and configured.)
+Instead, you can add the fields always, but suppress them from the output
+on servers where they don't apply.
+See the
+.B EXAMPLES
+section.
+.sp
+.RS
+Symbols of interest:
+.TP
+.B lcl.get('in_server_header')
+If this is set, and True,
+.B userexit_set_server
+is being called while creating the
+.B \-a
+output. Otherwise, it is called while creating the job display.
+.TP
+.B lcl['current_server']
+The hostname for the current server.
+.TP
+.B lcl['cfg']
+The field configuration that will be used by the layout module to
+display values.
+The
+.B cfg.change_fieldspec()
+routine can be used to modify certain aspects
+of the fields on a server-by-server basis.
+Most often, this would be to enable or suppress fields based on the server.
+See
+.B EXAMPLES
+section.
+.RE
+
+.TP
+.B userexit_post_opts(gbl, lcl)
+Called just before
+.B \-W
+options are examined for the first time.
+This routine is where site admins and users insert default
+.B \-W
+options.
+
+Symbols of interest:
+.RS
+.TP
+.B lcl['default_W']
+An empty list where the sysexit can insert strings as if from
+.B \-W
+arguments.
+When
+.B userexit_post_opts
+returns, the modified default_W will be inserted before
+the list of command line
+.B \-W options.
+.TP
+.B lcl['opts_W']
+The list of
+.B \-W
+options from the command line.
+.TP
+.B conf.ghostname
+The hostname where
+.B nas_qstat
+is running.
+This is not generally useful.
+What is usually more important is which host is the PBS server.
+.TP
+.B gbl['pbs_conf'].pbs_server_name
+The hostname of the default PBS server.
+Note that which server(s) are actually queried depends on the destinations
+specified on the command line.
+So, most server-dependent changes should be made in the
+.B set_server
+userexit by looking at the
+.B current_server
+local variable.
+
+.RE
+
+.TP
+.B userexit_post_statresv(gbl, lcl)
+Called by
+.B nas_rstat
+after it has queried for information about reservations.
+.sp
+.RS
+Symbols of interest.
+.TP
+.B lcl['resvs']
+The list of dictionaries representing the results of the pbs_statresv()
+calls.
+.RE
+.PP
+.SH ERRORS
+.PP
+.SH NOTES
+.PP
+.SH EXAMPLES
+The following example might be used by a site with multiple clusters
+where some clusters have GPUs and others do not.
+During initial reading and executing of the script, the field 'gpus'
+is unconditionally added to the default job field list.
+It is added after the 'cpus' field.
+.PP
+The script then defines two userexit functions.
+The first is stacked onto
+.B userexit_post_opts
+to set a few default
+.B \-W
+options.
+It sets the
+.B node_detail
+option so that the
+.B \-a
+output includes more details about node CPU, GPU, and memory use.
+It also limits the width of the Jobname field to 20 characters, with
+end-preserving truncation.
+The
+.B condense_vnodes
+option is set to a list of servers where vnode information should be
+condensed into the natural vnode.
+
+.PP
+The second userexit is stacked onto
+.BR userexit_set_server .
+Based on which server is being queried, it either enables or suppresses
+the GPU fields in the output.
+Note that when GPU info should be displayed, it needs to check the
+.B node_detail
+setting to decide which fields to enable/suppress in the
+.B \-a
+output.
+.EX
+
+# === Start of example
+# Possibly do different things based on whether we are statusing hosts,
+# queues, or jobs
+if args.B:
+    pass
+elif args.Q:
+    pass
+else:
+    # We add ngpus to default field list, if not already there
+    if 'gpus' not in default_fields:
+        try:
+            t = default_fields.index('cpus')
+        except:
+            t = len(default_fields) - 1
+        default_fields.insert(t+1, 'gpus')
+
+    # Define routine to set default -W values
+    def site_post_opts(gbl, lcl):
+        default_W = lcl['default_W']
+        default_W.extend(['node_detail'])
+        default_W.extend(['fmt_jobname=maxw:20 hj:e ht:...'])
+        default_W.extend(['condense_vnodes=pbspl4,server2'])
+
+    userexit_post_opts = stack_userexit(userexit_post_opts, site_post_opts)
+
+    # Define routine to tweak outputs based on server
+    def site_set_server(g, lcl):
+        server_name = lcl['current_server'].split('.')[0]
+        cfg = lcl['cfg']
+        svr_hdr = lcl.get('in_server_header', False)
+        showgpu = server_name in ['pbspl4']
+        if svr_hdr:
+            # Enable/disable all GPU fields in -a node output
+            node_detail = lcl.get('node_detail', False)
+            cfg.change_fieldspec('gpus', suppress=not showgpu or node_detail)
+            cfg.change_fieldspec('gused', suppress=not showgpu or not node_detail)
+            cfg.change_fieldspec('gfree', suppress=not showgpu or not node_detail)
+        else:
+            # Enable/disable job GPU column
+            cfg.change_fieldspec('gpus', suppress=not showgpu)
+
+    userexit_set_server = stack_userexit(userexit_set_server, site_set_server)
+# === End of example
+
+.EE
+.PP
+The next example shows how to define a new job field. In this case, the
+field computes the "expansion factor" for a job, using a simplistic
+formula.
+(Most sites that measure expansion factor use a more complicated formula.)
+The example uses the
+.B add_fields
+userexit to define the field and how it is displayed.
+To display this value, add the "expf" field to the job output list:
+.BR "-W o=+expf" .
+.EX
+
+# === Start of example
+# Possibly do different things based on whether we are statusing hosts,
+# queues, or jobs
+if args.B:
+    pass
+elif args.Q:
+    pass
+else:
+    # Define a formatter to calculate expansion factor.
+    # It is defined as (walltime + waittime) / walltime, where waittime
+    # is the time difference between when the job is queued and when
+    # it starts.
+    def my_add_fields(gbl, lcl):
+        def fmt_expansion(fi, info):
+            state = info.get('job_state', '?')
+	    # Until the job finishes, we estimate used walltime as
+	    # the requested walltime.
+            if state in 'FX':
+                wallt = info.get('resources_used.walltime', None)
+            else:
+                wallt = info.get('Resource_List.walltime', None)
+            qtime = info.get('qtime', None)
+            stime = info.get('stime', None)
+            if wallt and qtime and stime:
+                wallt = clocktosecs(wallt)
+                t = (wallt + int(stime) - int(qtime)) / wallt
+                return "%0.2f" % t
+            return '--'
+        setattr(nas_field_format, 'fmt_expansion', fmt_expansion)
+
+        fmtr = lcl.get('fmtr')
+        t = gen_field('expf', 'Expf', {'hj': 'r'}, 'fmt_expansion',
+            'job_state resources_used Resource_List qtime stime')
+        fmtr.known_fields.append(t)
+    userexit_add_fields = stack_userexit(userexit_add_fields, my_add_fields)
+# === End of example
+
+.EE

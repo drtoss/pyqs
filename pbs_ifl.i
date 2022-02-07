@@ -83,12 +83,24 @@
 }
 %{
 #include "pbs_ifl.h"
-#include "my_config.h"
+#include "pbs_error.h"
+#include "my_pbsconf.h"
 %}
-%include "pbs_ifl.h"
-%include "my_config.h"
+
+/* functions to acquire values from thread specific variables */
+%inline
 %{
-/* NAS tweak to provide access to pbs_errno */
-int pbs_Errno(void) { return pbs_errno; }
+int get_pbs_errno(void)
+{
+    return pbs_errno;
+}
+
+const char * get_pbs_server(void)
+{
+    return pbs_server;
+}
 %}
-extern int pbs_Errno(void);
+
+%include "pbs_ifl.h"
+%include "pbs_error.h"
+%include "my_pbsconf.h"

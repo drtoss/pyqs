@@ -64,7 +64,7 @@ Display memory sizes in 8 byte megawords.
 .TP
 .B -Q
 Display status for PBS queues. Destination operands are queue names at the
-default server. Queues at others servers can be specified as
+default server. Queues at other servers can be specified as
 .IR "queue_name@server" .
 
 .TP
@@ -104,6 +104,12 @@ Select only jobs from specified user.
 .B -x
 Include finished and moved jobs (if the server is configured to maintain
 job history).
+
+.TP
+.BI --debug " option"
+Debugging options for developers. See
+.B "DEBUG OPTIONS"
+section.
 .SS -W OPTIONS
 The
 .B -W
@@ -184,7 +190,9 @@ space, unless
 .TP
 .B maxw:
 (max\ width) Maximum width of column.
-If not set, nas_qstat picks a width that accommodates all values.
+If not set,
+.B nas_qstat
+picks a width that accommodates all values.
 
 .TP
 .B minw:
@@ -200,7 +208,8 @@ If not set, nas_qstat picks a width that accommodates all values.
 (row\ just) Justification to apply to data values (default
 .BR hj ).
 See
-.B hj for values.
+.B hj
+for values.
 
 .TP
 .B rs:
@@ -211,6 +220,16 @@ See
 .B rt:
 (row\ trunc) String to indicate truncation of field (default
 .BR ht ).
+
+.TP
+.B suppress:
+Set to True to suppress column from output. This is different
+from
+.B o=-name
+in that the latter removes the field everywhere, whereas
+.B suppress
+can be used to enable or disable the field on a
+server by server basis.
 
 .TP
 .B title:
@@ -226,6 +245,28 @@ settings for the header rows.
 .RE
 .sp
 
+.TP
+.BI fmta_ name = formatting options
+Like
+.BI fmt_ name
+described above, except applied to the fields in the
+.B -a
+node output.
+
+.TP
+.BI condense_vnodes= host[,host...]
+If the PBS server appears in the comma-separated list of hosts,
+then nodes with multiple vnodes should be summarized in the
+.B \-a
+output.
+That is, when a vnode agrees with the
+natural vnode in queue and vntype, and when its state is
+similar to the natural vnode's state, then sum the vnode's
+resources into the entry for the natural vnode. Otherwise,
+the vnode appears by itself.
+.sp
+Instead of a host list, the values "True" or "False" (or "t"/"f") can be
+used to enable/disable condensing for all servers.
 .TP
 .BI host[s]= host_pattern
 Restrict reporting of jobs to those running on nodes whose names match the
@@ -243,6 +284,11 @@ of
 output.
 
 .TP
+.B human
+When time durations are displayed, convert durations over 48 hours to
+days.
+
+.TP
 .B model
 At NAS, include the node model type in the
 .I info
@@ -251,8 +297,20 @@ field of the
 node status display.
 
 .TP
+.BI node_bin_total= nnn
+When generating the node information for the
+.B -a
+output,
+if there are
+.I nnn
+or more nodes to display, then summarize similar nodes, rather than listing
+them individually.
+See also
+.BR node_bin_size .
+
+.TP
 .BI node_bin_size= mmm
-When the number of nodes selected for the beginning section of the
+When the number of nodes selected for the
 .B -a
 output exceeds the value of
 .BR node_bin_total ,
@@ -262,18 +320,6 @@ each group of more than
 similar nodes.
 Otherwise, individually display the nodes in the group.
 Nodes are "similar" when their info fields are identical.
-
-.TP
-.BI node_bin_total= nnn
-When generating the node information at the beginning of the
-.B -a
-output,
-if there are
-.I nnn
-or more nodes to display, then summarize similar nodes, rather than listing
-them individually.
-See also
-.BR node_bin_size .
 
 .TP
 .B node_comments
@@ -303,9 +349,69 @@ If the list is prefixed with '-', the given fields are removed from the display 
 If the list is prefixed with '+', the given fields are appended to the display list.
 Specifying
 .RB ' o=? '
-requests nas_qstat to list the currently known fields and then exit.
+requests
+.B nas_qstat
+to list the currently known fields and then exit.
 The known fields can be changed by the site administrator or by the user.
 The current list is acct, aoe, cnt, cpct, cput, ctime, eff, elapwallt, eligtime, eligwait, estend, eststart, exitstatus, group, jobid, jobname, lifetime, maxwallt, memory, minwallt, mission, model, nds, place, pmem, pri, qtime, queue, rank0, reqid, reqmem, remwallt, reqdwallt, runs, s, sessid, seqno, ss, stime, tsk, user, vmem.
+
+If the attribute or resource of interest is not in the known
+field list, it can be requested by using a field name of 'A_xyz', 'RL_xyz',
+or 'RU_xyz'.
+The
+.I 'xyz'
+portion of the field name specifies the attribute or resource,
+and must be typed exactly as it appears in qstat -f output.
+The 'A_' prefix indicates a job attribute; 'RL_' is for
+a quantity from the job 'Resource_List' attribute; and 'RU_' refers
+to 'resources_used' by running or completed jobs.
+
+So, for example, to include the Rerunable attribute for jobs, use
+.RE 1
+.in 0
+.EX
+
+$ nas_qstat -W o=+A_Rerunable
+                                              Req'd    Elap
+JobID         User     Queue Jobname CPUs Nds wallt S wallt Eff Rerunable
+------------- -------- ----- ------- ---- --- ----- - ----- --- ---------
+12479.server2 dtalcott workq STDIN      1   1    -- H 00:00  -- True
+
+.EE
+.RS
+To see how much walltime was used, the following works:
+.RE 1
+.in 0
+.EX
+
+$ nas_qstat -x -W o=+RU_walltime
+                                              Req'd    Elap
+JobID         User     Queue Jobname CPUs Nds wallt S wallt Eff walltime
+------------- -------- ----- ------- ---- --- ----- - ----- --- --------
+12480.server2 dtalcott workq STDIN      2   1 01:00 F 00:01  0% 00:01:05
+
+.EE
+.RS
+To change how these fields are formatted, use the
+usual -W fmt_name= method, where the field name includes the prefix. E.g.,
+.B "-W fmt_A_Rerunable=maxw:5".
+.RE
+.TP
+.BI oa= [+-]field_list
+Like
+.B o=
+except that it applies to the fields in the
+.B -a
+output.
+The current list of known fields is host, cpus, cused, cfree, gpus, gused, gfree, mem, mused, mfree, state, tasks, jobs, ninfo.
+
+As with
+.BR o= ,
+fields can be added to this list using special names for the fields. In
+this case, 'A_xyz', 'RA_xyz', or 'RI_xyz'. The 'A_' prefix selects a
+node attribute; 'RA_' selects a resources_available quantity; and 'RI_'
+selects resources_assigned ("In use").
+
 .SH EXIT STATUS
 Normally returns 0. Returns 1 on errors (e.g., nonexistent queue or jobid).
 
@@ -314,7 +420,7 @@ Normally returns 0. Returns 1 on errors (e.g., nonexistent queue or jobid).
 .TP
 .B HOME
 Used to locate user's
-.I .qstat_sysexits
+.I .qstat_userexits
 file.
 If not set, the password database is consulted for the user's home directory.
 
@@ -326,177 +432,43 @@ file is consulted (usually
 
 .SH FILES
 .TP
-PBS_EXEC/lib/site/qstat_sysexits
+PBS_EXEC/lib/site/qstat_userexits
 Administrator provided python code to provide default values and
-sysexits. See
-.B SYSEXITS
+userexits. See
+.B USEREXITS
 section.
 .TP
 PBS_EXEC/bin/pbs_python
 Python interpreter that runs
 .BR nas_qstat .
 .TP
-$HOME/.qstat_sysexits
-User supplied python code to provide default values and sysexits.
+$HOME/.qstat_userexits
+User supplied python code to provide default values and userexits.
 See
-.B SYSEXITS
+.B USEREXITS
 section.
 
-.SH SYSEXITS
+.SH USEREXITS
 .B nas_qstat
-invokes three administrator- or user- supplied routines at specific
+invokes administrator- or user-supplied routines at specific
 points during its execution.
-The routines are passed two arguments, g and l, where
-.B g
-is the global
-dictionary and
-.B l
-is the local dictionary at the point of call.
-.sp
-This is a two-step process. Early in
+These routines are defined by the site administrator from
+a file at PBS_HOME/lib/site/qstat_userexits and by the user
+from a file at $HOME/.qstat_userexits.
+These routines are used to modify default settings, to
+supply default
+.B -W
+options, or to otherwise customize
 .B nas_qstat
-execution, after command-line arguments have been parsed, but before any
-.B -W
-options have been evaluated,
-.B nas_qstat
-searches in two places for snippets of python code to execute via python's
-.I compile
-and
-.I exec
-methods.
-The first place searched is
-.IR PBS_EXEC/lib/site/ ,
-where the file
-.I qstat_sysexits
-is read, if it exists.
-The second search location is
-.IR $HOME/.qstat_sysexits ,
-which is also read, if it exists.
-.sp
-The contents of these files are catenated and passed to
-.I compile
-and
-.IR exec .
-While these snippets of code can perform some actions themselves, their
-primary purpose is to override/extend routines that will be called later
-during
-.BR nas_qstat 's
-execution.
-The routines overriden or defined comprise the second step and are
-described next.
-Interesting variables directly available from the snippets are:
-.RS
-.TP
-.B args.B
-True if
-.B -B
-specified on command line.
-.TP
-.B args.Q
-True if
-.B -Q
-specified on command line.
-.TP
-.B default_fields
-A list with the names of default fields. This list can be
-edited directly, although it is preferred to make changes using the
-.B sysexit_post_opt
-routine.
-.TP
-.B stack_sysexit(old, new)
-Routine that creates a new routine that calls the
-.B old
-sysexit routine and
-then the
-.B new
-one.
-The primary use is in the user's sysexit script to call the site's
-version of that sysexit and then call the user's version.
-.RE
+output.
 
-.TP
-.B "sysexit_post_opts(g, l)"
-Called immediately after the snippets are loaded and before
-.B -W
-options are examined to adjust formatting. This is where you might change
-the default field list and formats.
-Variables of interest are:
-.RS
-.TP
-.B l('default_W')
-An empty list to which -W options can be added.
-These will appear as if added to the command line before any other
-.B -W
-options.
-See the example below.
-.RE
+See the
+.B nas_qstat_userexits
+man page for more information.
 
-.TP
-.B "sysexit_add_fields(g, l)"
-Called after the layout formatter has been created, but before the formatting
-options from
-.B -W
-options have been examined.
-Its purpose is to allow the site/user to define a new field and how to
-format that field.
-Surprisingly perhaps, even though
-.B sysexit_add_fields
-is called after
-.BR sysexit_post_opts ,
-the latter can include fmt_xxx options that affect how the new field(s)
-are displayed.
-
-.TP
-.B "sysexit_set_server(g, l)"
-When displaying job status, this is called after information about the
-server has been fetched, but before anything is displayed.
-If multiple servers are specified among the command line destinations,
-.B sysexit_set_server
-is called for each server.
-When called, interesting variables are:
-.RS
-.TP
-.B l['current_server']
-Has the name of the server, usually as a FQDN.
-.TP
-.B l['in_server_header']
-Set True when preparing the host list display at the beginning of
-.B -a
-output. Unset when preparing job display.
-.TP
-.B l['cfg']
-The current configuration object for laying out the display.
-Using this, you can directly change formatting options for specific
-fields.
-.TP
-.B cfg.change_fieldspec(t, ...)
-A class function allowing direct access to the object that holds
-formatting specifications for the field with the title
-.BR t .
-Note that the field is referenced by its field title, not by
-the name used on -W fmt_xxx options. E.g., field 'cpus' has title 'CPUs'.
-If you change the title via
-.BR -W fmt_xxx=title:new_title ,
-then you must use "new_title" in the call to
-.BR change_fieldspec .
-.PP
-The intended purpose of this sysexit is to enable or suppress fields from
-the output.
-Note that this cannot be done by one of the earlier sysexits because
-the actual server used is not known when those sysexits run.
-(On the other hand, if the site has only one server, then it is more efficient
-to add or remove fields using
-.IR sysexit_post_opt .)
-Further note that this routine is called too late to add or remove fields.
-Instead, you can suppress undesired fields or unsuppress fields that
-are normally not displayed.
-Fields are suppressed by setting their
-.B suppress
-field specification to
-.BR False .
-.sp
-.RE
-See the EXAMPLE SYSEXITS section for typical uses.
+See the
+.B "EXAMPLE USEREXITS"
+section for examples.
 .SH EXAMPLES
 .sp
 Show running jobs.
@@ -571,9 +543,9 @@ JobID      User     Queue Jobname TSK Nds wallt S  wallt Eff
 22.server2 dtalcott playq STDIN     1   1 00:33 Q 265:30  --
 8.server2  dtalcott playq STDIN     1   1 00:03 H  00:00  --
 .EE
-.SH EXAMPLE SYSEXITS
-This example shows a
-.I qstat_sysexits
+.SH EXAMPLE USEREXITS
+This first example shows a
+.I qstat_userexits
 file that a site might install in
 .I PBS_EXEC/lib/site
 to enable NAS options,
@@ -583,15 +555,12 @@ and
 .B model
 .B -W
 options default.
-The example also displays GPU information only for jobs on servers in
-a particular list ('pbspl4' in the example). For other servers, the column
-is suppressed.
 .sp
 .EX
 # Enable NAS-specific features
 globals()['gNAS'] = True
 
-# Possibly do different things based on whether we are statusing hosts,
+# Possibly do different things based on whether we are statusing servers,
 # queues, or jobs
 if args.B:
     pass
@@ -600,6 +569,7 @@ elif args.Q:
 else:
     # We add ngpus to default field list, if not already there
     if 'gpus' not in default_fields:
+        # Add it after cpus field or at end
         try:
             t = default_fields.index('cpus')
         except:
@@ -607,35 +577,37 @@ else:
         default_fields.insert(t+1, 'gpus')
 
     # Set up routine to set default -W values
-    def site_post_opts(g, l):
-        l['default_W'].extend(['node_detail', 'model'])
+    def site_post_opts(gbl, lcl):
+        default_W = lcl['default_W']
+        default_W.extend(['node_detail', 'model'])
 
-    sysexit_post_opts = stack_sysexit(sysexit_post_opts, site_post_opts)
+    userexit_post_opts = stack_userexit(userexit_post_opts, site_post_opts)
 
     # Set up routine to tweak outputs based on server
-    def site_set_server(g, l):
-        server_name = l['current_server'].split('.')[0]
-        cfg = l['cfg']
-        svr_hdr = l.get('in_server_header', False)
+    def site_set_server(g, lcl):
+        server_name = lcl['current_server'].split('.')[0]
+        cfg = lcl['cfg']
+        svr_hdr = lcl.get('in_server_header', False)
+        supgpu = server_name not in ['pbspl4']
         if svr_hdr:
-            if not server_name in ['pbspl4']:
-                # Disable all GPU fields in -a node output
-                cfg.change_fieldspec('GPUs', suppress=True)
-                cfg.change_fieldspec(['GPUs', 'used'], suppress=True)
-                cfg.change_fieldspec(['', 'free'], suppress=True)
+            # Enable/disable all GPU fields in -a node output
+            # If node_detail is selected on a GPU server, we
+            # want to enable GPUs used and free. Otherwise, just
+            # the GPUs field.
+            node_detail = lcl.get('node_detail', False)
+            cfg.change_fieldspec('gpus', suppress=supgpu or node_detail)
+            cfg.change_fieldspec('gused', suppress=supgpu or not node_detail)
+            cfg.change_fieldspec('gfree', suppress=supgpu or not node_detail)
         else:
             # Enable/disable job GPU column
-            if server_name in ['pbspl4']:
-                cfg.change_fieldspec('GPUs', suppress=False)
-            else:
-                cfg.change_fieldspec('GPUs', suppress=True)
+            cfg.change_fieldspec('gpus', suppress=supgpu)
 
-    sysexit_set_server = stack_sysexit(sysexit_set_server, site_set_server)
+    userexit_set_server = stack_userexit(userexit_set_server, site_set_server)
 
 .EE
 .PP
 The next example shows what a user might put in their
-.I $HOME/.qstat_sysexits
+.I $HOME/.qstat_userexits
 file.
 This example limits the jobname field to 20 characters and uses "..."
 to indicate parts of the name have been elided.
@@ -646,7 +618,8 @@ The
 .B set_server
 portion of the code limits the node info of the
 .B -a
-output to 40 characters.
+output to 30 characters, when running on a
+particular host.
 
 .EX
 if args.B:
@@ -654,20 +627,72 @@ if args.B:
 elif args.Q:
     pass
 else:
-    def my_post(g, l):
+    def my_post(gbl, lcl):
+        default_W = lcl['default_W']
         # Keep jobname field reasonable
-        l['default_W'].extend(['fmt_jobname=maxw:20 hj:e rt:...'])
+        default_W.extend(['fmt_jobname=maxw:20 hj:e rt:...'])
         # Use human readable durations
-        l['default_W'].extend(['human'])
-    sysexit_post_opts = stack_sysexit(sysexit_post_opts, my_post)
+        default_W.extend(['human'])
 
-    def my_server(g, l):
-        svr_hdr = l.get('in_server_header', False)
-        if svr_hdr:
-            cfg = l['cfg']
-            cfg.change_fieldspec('Node Info', maxw=40)
+    userexit_post_opts = stack_userexit(userexit_post_opts, my_post)
 
-    sysexit_set_server = stack_sysexit(sysexit_set_server, my_server)
+    def my_server(g, lcl):
+        svr_hdr = lcl.get('in_server_header', False)
+        server_name = lcl['current_server'].split('.')[0]
+        if svr_hdr and server_name in ['pbspl4']:
+            cfg = lcl['cfg']
+            cfg.change_fieldspec('ninfo', maxw=30)
+
+    userexit_set_server = stack_userexit(userexit_set_server, my_server)
 
 .EE
+.SH DEBUGGING OPTIONS
+The
+.B --debug
+command line option is used by developers. As such, it is subject to
+change.
+Currently recognized options include:
+.TP
+\fBfake_\fIstat\fP_\fIhost\fP=\fIpath\fP
+.B nas_qstat
+normally queries PBS servers for information. However,
+during development, it is useful to have a constant set of data to
+work with, or data from servers that are not available to the
+developers.
+So,
+.B nas_qstat
+supports supplying data from text files instead of
+from a server. The name of the debug option gives the pbs_statxxx
+call to be faked and for which server.
+.RS
+.TP
+.BI fake_jobs_ host
+Supplies the file with
+.B "qstat\ -f"
+information for server
+.IR host .
+.TP
+.BI fake_server_ host
+Supplies the file with
+.B "qstat\ -Bf"
+information for server
+.IR host .
+.TP
+.BI fake_vnodes_ host
+Supplies the file with
+.B "pbsnodes\ -av"
+information for server
+.IR host .
+.TP
+.BI fake_resvs_ host
+Supplies the file with
+.B "pbs_rstat\ -f"
+information for server
+.IR host .
+.RE
+Thus,
+.B "--debug=fake_jobs_pbspl4=faked_jobs.txt"
+says to read jobs status information for server pbspl4 from the file faked_jobs.txt.
 .sp
+.SH SEE ALSO
+nas_qstat_userexits(3)
