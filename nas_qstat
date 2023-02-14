@@ -153,6 +153,8 @@ def main():
                         'resources')
     parser.add_argument('--debug', default=[], action='append',
                         help='Debugging arguments (for developers)')
+    parser.add_argument('-f', default=False, action='store_true',
+                        help='Full output')
     parser.add_argument('-i', default=False, action='store_true',
                         help='Select queued, held, or waiting jobs')
     parser.add_argument('-n', default=False, action='store_true',
@@ -213,6 +215,8 @@ def main():
                 tlist.append(t if isinstance(t, str) else ' '.join(t))
             print('Known field titles', ', '.join(tlist))
 
+    if args.f:
+        default_fields = []
     # Build list of known fields
     opts_W = args.W
     if opts_W is None:
@@ -281,7 +285,7 @@ def main():
     if do_jobs and args.s:
         attr_list.add('comment')
     # If filtering by user/job, make sure we have those
-    if check_W_str('u'):
+    if do_jobs and check_W_str('u'):
         attr_list.add('Job_Owner')
         attr_list.add('Job_Name')
     # Build list of attributes we need to ask for.
@@ -295,7 +299,9 @@ def main():
     if len(attr_list) > 0:
         atl = list_to_attrl(attr_list)
     else:
-        if do_jobs:
+        if args.f:
+            atl = None
+        elif do_jobs:
             t = ['job_state']
             atl = list_to_attrl(t)
         else:
@@ -757,6 +763,8 @@ def display_servers(args, fmtr):
             info.extend(bs)
         if conn != -1:
             ifl.pbs_disconnect(conn)
+    if args.f:
+        return display_servers_f(args, fmtr, info)
     # Deal with state_count field by patching field title and
     # adding 'pretty_sc' attribute to each server
     if state_count_idx >= 0:
@@ -778,6 +786,33 @@ def display_servers(args, fmtr):
         show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
         res = layout.layout(cfg, rows, show_hdr=show_hdr)
         print('\n'.join([x.rstrip() for x in res]))
+    return 0
+
+
+def display_servers_f(args, fmtr, info):
+    ''' display server semi-raw (-f) info
+
+    Args:
+        args = result from argparse of command line
+        fmtr = field formatter object
+        info = list of batch-status results
+    '''
+    global opts_W
+
+    if info:
+        new_section()
+    for svr in info:
+        server_name = svr.get('id')
+        if not server_name:
+            next
+        rows = []
+        rows.append("Server: %s" % server_name)
+        for key in filter(lambda x: x not in ['id', 'pretty_sc'], svr.keys()):
+            item = svr[key]
+            row = "    %s = %s" % (key, item)
+            rows.append(row)
+        print('\n'.join(rows))
+        print()
     return 0
 
 

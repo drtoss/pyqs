@@ -161,6 +161,7 @@ class NAS_field_format(object):
             else:
                 for name in names:
                     fl.append(name.strip())
+        fl = list(filter(lambda x : x != '', fl))
         # Now, validate fields and constuct results
         knownmap = dict([[x['name'], x] for x in self.known_fields])
         knowns = set(knownmap.keys())
@@ -900,6 +901,8 @@ def define_on_the_fly(cur_flds, opts_W, which='o'):
     for key, value in [x.split('=', 1) if '=' in x else [x, '']
                        for x in opts_W]:
         if key != which:
+            continue
+        if value == '':
             continue
         if value[0] in '+-':
             value = value[1:]
