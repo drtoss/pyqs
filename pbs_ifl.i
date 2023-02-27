@@ -99,6 +99,11 @@ const char * get_pbs_server(void)
 {
     return pbs_server;
 }
+
+const char * get_pbs_version(void)
+{
+    return PBS_VERSION;
+}
 %}
 
 %include "pbs_ifl.h"

@@ -19,6 +19,7 @@ repo=~dtalcott/work/drtoss
 swig -python -I${repo}/src/include ./pbs_ifl.i
 
 t=$(pbs_python --version)
+version=${t#pbs_version = }
 case ${t#pbs_version = } in
 	(20.*)	sfx="3.*" ;;
 	(19.*)	sfx="2.*" ;;
@@ -26,6 +27,7 @@ esac
 gcc -g -O2 -Wall -Wno-unused-variable -fPIC -shared \
 	-I ${repo}/src/include \
 	-I /usr/include/python${sfx} \
+	-D PBS_VERSION='"'$version'"' \
 	-L ${PBS_EXEC}/lib \
 	-lpbs \
 	-Wl,-rpath=${PBS_EXEC}/lib \
