@@ -161,7 +161,7 @@ class NAS_field_format(object):
             else:
                 for name in names:
                     fl.append(name.strip())
-        fl = list(filter(lambda x : x != '', fl))
+        fl = list(filter(lambda x: x != '', fl))
         # Now, validate fields and constuct results
         knownmap = dict([[x['name'], x] for x in self.known_fields])
         knowns = set(knownmap.keys())
