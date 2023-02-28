@@ -18,8 +18,6 @@ def check_perms():
     import os
     import stat
     user = os.getuid()
-    if user == 1000:
-        user = 501  # XXX Hack for VirtualBox under MacOS
     # First, clean up python search path by removing
     # dodgy entries.
     newp = []
@@ -109,7 +107,7 @@ gshare_entity_info = dict()
 host_re = None
 opts_W = list()
 verbose = 0
-version = "0.1.2"
+version = "0.2"
 
 conf.gNow = gNow
 conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
@@ -129,10 +127,13 @@ def main():
     parser = argparse.ArgumentParser(description=long_desc, prog=prog,
                                      formatter_class=t)
     thing_type = parser.add_mutually_exclusive_group()
+    display_type = parser.add_mutually_exclusive_group()
     parser.add_argument('--version', action='version',
                         version='%(prog)s ' + version)
     thing_type.add_argument('-B', default=False, action='store_true',
                             help='Display information for servers')
+    parser.add_argument('-F', choices=['json', 'JSON'],
+                        help='Specify encoding for -f output')
     parser.add_argument('-G', default='b', action='store_const',
                         dest='size_units', const='G',
                         help='Display sizes in gigabytes')
@@ -148,13 +149,13 @@ def main():
     parser.add_argument('-W', action='append', metavar='display option',
                         help='Options customizing field selection and '
                         'display.')
-    parser.add_argument('-a', default=False, action='store_true',
-                        help='Include information about server and compute '
-                        'resources')
+    display_type.add_argument('-a', default=False, action='store_true',
+                              help='Include information about server and '
+                              'resources')
     parser.add_argument('--debug', default=[], action='append',
                         help='Debugging arguments (for developers)')
-    parser.add_argument('-f', default=False, action='store_true',
-                        help='Full output')
+    display_type.add_argument('-f', default=False, action='store_true',
+                              help='Full output')
     parser.add_argument('-i', default=False, action='store_true',
                         help='Select queued, held, or waiting jobs')
     parser.add_argument('-n', default=False, action='store_true',
@@ -178,6 +179,9 @@ def main():
     args = parser.parse_args()
     conf.verbose = verbose = args.verbose
     conf.gdebug = gdebug = ' '.join(args.debug)
+
+    if args.F:
+        args.F = args.F.lower()
 
     if (ifl.pbs_loadconf(0) == 0):
         print("Cannot get PBS configuration information", file=sys.stderr)
@@ -552,6 +556,9 @@ def display_jobs(args, fmtr):
     for conn in set(server_conn.values()):
         if conn is not None and conn != -1:
             ifl.pbs_disconnect(conn)
+    if args.f:
+        t = "Job" if conf.gNAS else "Job Id"
+        return display_f(args, info, t, "Jobs")
     # Tag sort job list
 
     def cmpf(i):
@@ -683,6 +690,8 @@ def display_queues(args, fmtr):
             info.extend(bs)
         if conn != -1:
             ifl.pbs_disconnect(conn)
+    if args.f:
+        return display_f(args, info, "Queue", "Queue")
     # Deal with state_count field by patching field title and
     # adding 'pretty_sc' attribute to each server
     if state_count_idx >= 0:
@@ -764,7 +773,9 @@ def display_servers(args, fmtr):
         if conn != -1:
             ifl.pbs_disconnect(conn)
     if args.f:
-        return display_servers_f(args, fmtr, info)
+        if info:
+            new_section()
+        return display_f(args, info, "Server", "Server")
     # Deal with state_count field by patching field title and
     # adding 'pretty_sc' attribute to each server
     if state_count_idx >= 0:
@@ -786,33 +797,6 @@ def display_servers(args, fmtr):
         show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
         res = layout.layout(cfg, rows, show_hdr=show_hdr)
         print('\n'.join([x.rstrip() for x in res]))
-    return 0
-
-
-def display_servers_f(args, fmtr, info):
-    ''' display server semi-raw (-f) info
-
-    Args:
-        args = result from argparse of command line
-        fmtr = field formatter object
-        info = list of batch-status results
-    '''
-    global opts_W
-
-    if info:
-        new_section()
-    for svr in info:
-        server_name = svr.get('id')
-        if not server_name:
-            next
-        rows = []
-        rows.append("Server: %s" % server_name)
-        for key in filter(lambda x: x not in ['id', 'pretty_sc'], svr.keys()):
-            item = svr[key]
-            row = "    %s = %s" % (key, item)
-            rows.append(row)
-        print('\n'.join(rows))
-        print()
     return 0
 
 

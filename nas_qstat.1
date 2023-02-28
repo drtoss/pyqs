@@ -7,19 +7,19 @@
 .B Displaying Job Status
 .RS
 .B nas_qstat
-[-i|-r] [-G|-M] [-J] [-n] [-s] [-t] [-x] [-W option] [[<job ID> | <destination>] ...]
+[-i|-r] [-f [-F json]] [-G|-M] [-J] [-n] [-s] [-t] [-x] [-W option] [[<job ID> | <destination>] ...]
 .sp
 .RE
 .B Displaying Queue Status
 .RS
 .B nas_qstat
--Q [<destination> ...]
+-Q [-f -F json]] [<destination> ...]
 .sp
 .RE
 .B Displaying Server Status
 .RS
 .B nas_qstat
--B [<server> ...]
+-B [-f -F json]] [<server> ...]
 .sp
 .RE
 .B Version Information
@@ -44,6 +44,12 @@ compute resources.
 .B -B
 Display status for PBS server hosts listed on command line. If none specified,
 display information for the local host's default PBS server.
+
+.TP
+.B "-F json"
+Specifies that
+.B -f
+output should be in JSON format.
 
 .TP
 .B -G
@@ -73,6 +79,10 @@ Options affecting how statuses are displayed.
 See
 .B "\-W OPTIONS"
 section.
+
+.TP
+.B -f
+Display information with one attribute per line
 
 .TP
 .B -i

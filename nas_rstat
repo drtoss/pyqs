@@ -16,8 +16,6 @@ def check_perms():
     import os
     import stat
     user = os.getuid()
-    if user == 1000:
-        user = 501  # XXX Hack for VirtualBox under MacOS
     # First, clean up python search path by removing
     # dodgy entries.
     newp = []
@@ -118,6 +116,8 @@ def main():
                         help='brief output: just reservation IDs')
     parser.add_argument('-F', default=False, action='store_true',
                         help='request full details')
+    parser.add_argument('-f', default=False, action='store_true',
+                        help='output one line per attribute')
     parser.add_argument('-S', default=False, action='store_true',
                         help='request short output (default)')
     parser.add_argument('--debug', default=[], action='append',
@@ -211,8 +211,10 @@ def main():
     if resvs is None:
         sys.exit(1)
     userexit_post_statresv(globals(), locals())
+    if args.f:
+        display_f(args, resvs, "Resv ID", "ResvID")
     # Display it
-    if args.B:
+    elif args.B:
         display_brief(resvs, fmtr)
     elif args.F:
         display_full(resvs, fmtr)

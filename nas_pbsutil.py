@@ -8,6 +8,8 @@ import os
 import socket
 import stat
 import sys
+import time
+import json
 
 import nas_xstat_config as conf
 import pbs_ifl as ifl
@@ -212,8 +214,6 @@ def load_userexits(prefix):
     '''
     code = ''
     user = os.getuid()
-    if user == 1000:
-        user = 501  # XXX for debugging on MacOS
     # Load system userexit, if present.
     pbs_exec = pbs_conf.pbs_exec_path
     t = os.environ.get('NAS_QSTAT_EXEC')
@@ -318,6 +318,174 @@ userexits_header = 'global %s\n' % ','.join(
         'userexit_post_statresv'
     ]
 )
+
+# Routines dealing with -f output
+
+
+# List of attributes to be ignored when dumping a batch status
+ignore_attrs = {
+    'id',
+    'pretty_sc'
+}
+
+# Set of attributes with epoch times to be displayed in human form
+time_attrs = {
+    ifl.ATTR_ctime,
+    ifl.ATTR_etime,
+    ifl.ATTR_mtime,
+    ifl.ATTR_qtime,
+    ifl.ATTR_stime,
+    ifl.ATTR_resv_start,
+    ifl.ATTR_resv_end,
+    ifl.ATTR_estimated + '.' + 'start_time'
+}
+# Safely add attributes from newer versions of PBS
+try:
+    time_attrs.update({ifl.ATTR_obittime})
+except AttributeError:
+    pass
+
+
+def display_f(args, info, item_tag, json_tag):
+    '''Display -f output
+
+    Args:
+        args: result from argparse of command line
+        info: list of batch status data to display
+        item_tag: tag for each item in plain -f output
+        json_tag: tag for dictionary of items in JSON output
+    '''
+    if args.F == 'json':
+        bs_to_json(info, json_tag)
+        return 0
+    for item in info:
+        item_name = item.get('id')
+        if not item_name:
+            continue
+        rows = []
+        rows.append("%s: %s" % (item_tag, item_name))
+        for key in filter(lambda x: x not in ignore_attrs, item.keys()):
+            attr = item[key]
+            row = "    %s = %s" % (key, attr)
+            if key in time_attrs:
+                t = time.strftime('%a %b %d %X %Z %Y',
+                                  time.localtime(int(attr)))
+                row += ' (' + t + ')'
+            rows.append(row)
+        print('\n'.join(rows))
+        print()
+    return 0
+
+
+gEncoder = None
+
+
+def bs_to_json(info, tag, timestamp=None, version=None, server=None):
+    '''
+    Convert a PBS batch status list to json.
+    Insert a prefix along the way to mimic qstat.
+    We convert and print one item at a time to handle large numbers of items
+    without having to gather them all into one gigantic output.
+
+    Args:
+        info = bs list
+        tag = JSON key for item list
+        timestamp = epoch time for which info applies
+        version = routine version
+        server = server queried to get info
+    Returns:
+        True, JSON formatted output to stdout
+    '''
+    if not info:
+        # Nothing in, nothing out
+        return True
+    if timestamp is None:
+        timestamp = conf.gNow
+    if version is None:
+        version = ifl.get_pbs_version()
+    if server is None:
+        server = pbs_conf.pbs_server_name
+    # Construct the prefix
+    print("""{
+    "timestamp":%d,
+    "pbs_version":"%s",
+    "pbs_server":"%s",
+    "%s":{""" % (timestamp, version, server, tag))
+    # Convert each item to JSON and output
+    firsttime = True
+    for item in info:
+        if not firsttime:
+            print(',')
+        firsttime = False
+        print(bs_item_to_json(item, 2), end='')
+    print("""
+    }
+}""")
+    return True
+
+
+def bs_item_to_json(bs, lvl):
+    '''
+    Convert an item from a batch_status to JSON text.
+    This is not a general purpose python->JSON routine. It knows certain things
+    about PBS batch statuses. In particular, the python IFL batch status
+    returns integers as strings, we need to convert them back to integers.
+    Also, resource lists get returned as multiple entries with keys of the form
+    "attribute_name.resource_name". We need to merge those back to lists
+    of the resources for a give attribute.
+
+    Args:
+        bs = item from a batch status
+        lvl = current indenting level
+    Returns: Item as JSON text,
+             None on error.
+    '''
+    global gEncoder
+    if not bs:
+        return None
+    if gEncoder is None:
+        gEncoder = json.JSONEncoder(check_circular=False, indent=4,
+                                    separators=(',', ':')).encode
+    item_name = bs.get('id', None)
+    if item_name is None:
+        return None
+    cur_attrname = None
+    cur_resclist = {}
+    json_data = {}
+    pfx = '    ' * lvl
+    for (key, value) in bs.items():
+        if key == 'id':
+            continue
+        if isinstance(value, str) and value.isdigit():
+            t = int(value)
+            if str(t) == value:
+                value = t
+        if '.' in key:
+            (attr, resc) = key.split('.', 1)
+        else:
+            (attr, resc) = (key, None)
+        # See if we reached the end of a resource list
+        if cur_attrname and cur_attrname != attr:
+            json_data[cur_attrname] = cur_resclist
+            cur_attrname = None
+            cur_resclist = {}
+        # Check for start of resource list
+        if cur_attrname is None and resc:
+            cur_attrname = attr
+            cur_resclist[resc] = value
+            continue
+        # Check for continuing resource list
+        if cur_attrname == attr:
+            cur_resclist[resc] = value
+            continue
+        # Normal entry
+        json_data[attr] = value
+    # Handle falling off the end of a resource list
+    if cur_attrname:
+        json_data[cur_attrname] = cur_resclist
+    t = '%s"%s":' % (pfx, item_name) + gEncoder(json_data)
+    return ('\n' + pfx).join(t.split('\n'))
+
 
 # Utility functions copied from PTL's BatchUtils class
 
