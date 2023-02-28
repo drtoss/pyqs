@@ -7,7 +7,7 @@
 .B Displaying Job Status
 .RS
 .B nas_qstat
-[-i|-r] [-f [-F json]] [-G|-M] [-J] [-n] [-s] [-t] [-x] [-W option] [[<job ID> | <destination>] ...]
+[-i|-r] [-f [-F json]] [-G|-M] [-J] [-n] [-s] [-t] [-x] [-W option] [-1] [[<job ID> | <destination>] ...]
 .sp
 .RE
 .B Displaying Queue Status
@@ -114,6 +114,15 @@ Select only jobs from specified user.
 .B -x
 Include finished and moved jobs (if the server is configured to maintain
 job history).
+
+.TP
+.B -1
+If
+.B -n
+and/or
+.B -s
+specified, include their info directly on the job line, rather than
+on separate lines.
 
 .TP
 .BI --debug " option"

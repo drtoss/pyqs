@@ -173,6 +173,9 @@ def main():
                         help='Increase debugging verbosity')
     parser.add_argument('-x', default=False, action='store_true',
                         help='Include finished and moved jobs')
+    parser.add_argument('-1', default=False, action='store_true',
+                        dest='oneline',
+                        help='Put any -n or -s info for a job on first line')
     parser.add_argument('things', nargs='*',
                         help='Jobs, queues, or servers to status')
 
@@ -607,6 +610,8 @@ def display_jobs(args, fmtr):
             func = getattr(nas_field_format, f['func'])
             row.append(func(f, job))
         rows.append(row)
+    endl = '' if args.oneline else '\n'
+    indent = '' if args.oneline else '  '
     if rows:
         new_section()
         show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
@@ -614,18 +619,20 @@ def display_jobs(args, fmtr):
         hdr_count = len(lines) - len(rows)
         i = 0
         for line in lines:
-            print(line.rstrip())
+            print(line.rstrip(), end=endl)
             jobi = i - hdr_count
             if jobi >= 0 and args.n:
                 t = info[jobi].get('exec_host', None)
                 if t:
-                    print("  ", t)
+                    print(indent, t, end=endl)
             if jobi >= 0 and args.s:
                 t = info[jobi].get('comment', None)
                 if t:
                     if len(t) > 76:
                         t = t[:73] + '...'
-                    print("  ", t)
+                    print(indent, t, end=endl)
+            if args.oneline:
+                print()
             i += 1
     return 1 if errcnt else 0
 
