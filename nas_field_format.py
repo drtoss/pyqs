@@ -96,7 +96,7 @@ class NAS_field_format(object):
             for (key, value) in opts:
                 if key == 'title':
                     # Replace \_ with space
-                    value.replace(r'\_', ' ')
+                    value = value.replace(r'\_', ' ')
                     # Might need to convert title to multi-line list
                     title = re.sub(r'\\n', '\n', value)
                     if title != value:
@@ -609,6 +609,12 @@ def fmt_user(fi, info):
     '''Raw format: user@host, or just user'''
     rawv = fmt_by_attr(fi, info)
     # If -W -r, return raw value
+    return rawv.split('@')[0]
+
+
+def fmt_user_from_owner(fi, info):
+    '''Raw format: user@host, or just user'''
+    rawv = fmt_by_name(fi, info, 'Job_Owner')
     return rawv.split('@')[0]
 
 

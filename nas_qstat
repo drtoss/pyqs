@@ -101,6 +101,7 @@ gNow = time.time()
 gdebug = []
 ghostname = ''
 ghostnameshort = ''
+gID = os.getuid()
 gserver_info = dict()
 gshare_data = dict()
 gshare_entity_info = dict()
@@ -252,6 +253,16 @@ def main():
     fmtr = NAS_field_format(default_fields)
     fmtr.known_fields = known_fields
     userexit_add_fields(globals(), locals())
+    # NAS allows visibility to some fields that are restricted by default.
+    # Use alternate sources for the data when available.
+    if not gNAS and gID != 0:
+        #  Here, euser is not visible, so use Job_Owner as best substitute
+        try:
+            idx = [x['name'] for x in known_fields].index('user')
+            known_fields[idx]['func'] = 'fmt_user_from_owner'
+            known_fields[idx]['sources'] = ['Job_Owner']
+        except:
+            pass
     # Handle -W formatting options
     # First, collect list of fields of interest and which PBS attributes
     # hold the values for those fields
@@ -353,7 +364,7 @@ def display_jobs(args, fmtr):
     if args.x:
         extend.add('x')
     if args.u:
-        selects['euser'] = args.u
+        selects['User_List'] = args.u
     if args.J:
         selects['array'] = 'True'
     extend = ''.join(extend)
@@ -480,10 +491,10 @@ def display_jobs(args, fmtr):
         sname = current_server.split('.')[0]
         bs = file_to_stat(sname, 'jobs', fmtr.atl)
         if bs is None:
+            namelist = ','.join(names)
             if sel_attr:
                 bs = ifl.pbs_selstat(conn, sel_attr, fmtr.atl, extend)
             else:
-                namelist = ','.join(names)
                 bs = ifl.pbs_statjob(conn, namelist, fmtr.atl, extend)
             err = ifl.get_pbs_errno()
             if err:
@@ -573,8 +584,8 @@ def display_jobs(args, fmtr):
             return t
         job = info[i]
         st = job.get('job_state', '?')
-        k1 = 'BRQHWTEX'.find(st)
-        if st in 'BR':
+        k1 = 'BRFQHWTEX'.find(st)
+        if st in 'BRF':
             k2 = safeint(job.get('Priority', '0'))
             k3 = job.get('queue', '')
             k4 = safeint(job.get('Resource_List.nodect', '0'))
@@ -622,11 +633,11 @@ def display_jobs(args, fmtr):
             print(line.rstrip(), end=endl)
             jobi = i - hdr_count
             if jobi >= 0 and args.n:
-                t = info[jobi].get('exec_host', None)
+                t = info[tags[jobi]].get('exec_host', None)
                 if t:
                     print(indent, t, end=endl)
             if jobi >= 0 and args.s:
-                t = info[jobi].get('comment', None)
+                t = info[tags[jobi]].get('comment', None)
                 if t:
                     if len(t) > 76:
                         t = t[:73] + '...'
