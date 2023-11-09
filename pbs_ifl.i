@@ -66,11 +66,22 @@
             }
             tmpv = PyDict_GetItem(dict, a);
             if (tmpv != NULL) {
-                char *s = PyString_AsString(tmpv);
+                PyObject *tmpo = NULL;
+                char *s = NULL;
+                if (PyUnicode_Check(tmpv)) {
+                  tmpo = PyUnicode_AsUTF8String(tmpv);
+                  s = PyBytes_AsString(tmpo);
+                } else if (PyBytes_Check(tmpv)) {
+                  tmpo = PyObject_Bytes(tmpv);
+                  s = PyBytes_AsString(tmpo);
+                } else {
+                  s = "???";
+                }
                 str = malloc(strlen(attribs->value) + strlen(s) + 4);
                 sprintf(str, "%s,%s", attribs->value, s);
                 v = PyString_FromString(str);
                 free(str);
+                Py_XDECREF(tmpo);
             }
             else {
                 v = PyString_FromString(attribs->value);
