@@ -161,6 +161,8 @@ def main():
                         help='Select queued, held, or waiting jobs')
     parser.add_argument('-n', default=False, action='store_true',
                         help='Include exec_host information')
+    parser.add_argument('-q', default=False, action='store_true',
+                        help='Select alternate queue display')
     parser.add_argument('-r', default=False, action='store_true',
                         help='Select running or suspended jobs')
     parser.add_argument('-s', default=False, action='store_true',
@@ -210,6 +212,10 @@ def main():
         default_fields = ['server_name', 'jm', 'state_count', 'default_queue',
                           'info']
         known_fields = gen_field_list_B()
+    elif args.q:
+        default_fields = ['q_name', 'q_memory', 'q_cput', 'q_wtime',
+                          'q_nodect', 'q_jrun', 'q_jqueue', 'q_lm', 'q_state']
+        known_fields = gen_field_list_q()
     else:
         do_jobs = True
         default_fields = ['jobid', 'user', 'queue', 'jobname', 'cpus', 'nds',
@@ -261,7 +267,7 @@ def main():
             idx = [x['name'] for x in known_fields].index('user')
             known_fields[idx]['func'] = 'fmt_user_from_owner'
             known_fields[idx]['sources'] = ['Job_Owner']
-        except:
+        except (KeyError, ValueError):
             pass
     # Handle -W formatting options
     # First, collect list of fields of interest and which PBS attributes
@@ -327,7 +333,7 @@ def main():
     fmtr.atl = atl
 
     # Last, get and display requested information
-    if args.Q:
+    if args.Q or args.q:
         rc = display_queues(args, fmtr)
     elif args.B:
         rc = display_servers(args, fmtr)
@@ -670,8 +676,9 @@ def display_queues(args, fmtr):
         cfg.add_field(title, ident=fld['name'], **fld['format'])
         if fld['func'] == 'fmt_state_count':
             state_count_idx = idx
-    rows = []
-    info = []
+    sinfo = []
+
+    svr_present = False
     # Get info about queues
     if args.things is None or len(args.things) == 0:
         conn = ifl.pbs_connect('')
@@ -682,7 +689,8 @@ def display_queues(args, fmtr):
             return 1
         bs = ifl.pbs_statque(conn, '', fmtr.atl, None)
         ifl.pbs_disconnect(conn)
-        info.extend(bs)
+        svr = pbs_conf.pbs_server_name
+        sinfo.append((svr.split('.')[0], bs))
     else:
         prev = None
         conn = -1
@@ -690,8 +698,14 @@ def display_queues(args, fmtr):
             parts = thing.split('@')
             if len(parts) < 2:
                 parts.append('')
+            else:
+                svr_present = True
             (qname, svr) = parts[0:2]
+            if svr == '':
+                svr = pbs_conf.pbs_server_name.split('.')[0]
+            new_svr = False
             if svr != prev:
+                new_svr = True
                 if conn != -1:
                     ifl.pbs_disconnect(conn)
                 conn = ifl.pbs_connect(svr)
@@ -705,28 +719,39 @@ def display_queues(args, fmtr):
             bs = ifl.pbs_statque(conn, qname, fmtr.atl, None)
             if len(bs) == 0:
                 continue
-            info.extend(bs)
+            if new_svr:
+                sinfo.append((svr.split('.')[0], bs))
+            else:
+                sinfo[-1][1].extend(bs)
         if conn != -1:
             ifl.pbs_disconnect(conn)
     if args.f:
-        return display_f(args, info, "Queue", "Queue")
+        tbs = []
+        for (sname, info) in sinfo:
+            tbs.extend(info)
+        return display_f(args, tbs, "Queue", "Queue")
     # Deal with state_count field by patching field title and
-    # adding 'pretty_sc' attribute to each server
+    # adding 'pretty_sc' attribute to each queue
     if state_count_idx >= 0:
-        scounts = pretty_state_counts(info)
-        fs = cfg.config[state_count_idx]
-        fs.title[1] = scounts[0]
-        for idx, svr in enumerate(info):
-            svr['pretty_sc'] = scounts[idx]
-    for svr in info:
+      for (svr, info) in sinfo:
+         scounts = pretty_state_counts(info)
+         fs = cfg.config[state_count_idx]
+         fs.title[1] = scounts.pop(0)
+         for idx, que in enumerate(info):
+            que['pretty_sc'] = scounts[idx]
+    for (svr, info) in sinfo:
+      rows = []
+      for que in info:
         row = list()
         for f in fmtr.field_list:
             func = getattr(nas_field_format, f['func'])
-            row.append(func(f, svr))
+            row.append(func(f, que))
         rows.append(row)
-    if rows:
+      if rows:
         new_section()
         show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
+        if show_hdr and svr_present:
+            print("\nserver: %s\n" % svr)
         res = layout.layout(cfg, rows, show_hdr=show_hdr)
         print('\n'.join([x.rstrip() for x in res]))
     return 0
@@ -799,11 +824,9 @@ def display_servers(args, fmtr):
     if state_count_idx >= 0:
         scounts = pretty_state_counts(info)
         fs = cfg.config[state_count_idx]
-        fs.title[1] = scounts[0]
-        idx = 1
-        for svr in info:
+        fs.title[1] = scounts.pop(0)
+        for idx, svr in enumerate(info):
             svr['pretty_sc'] = scounts[idx]
-            idx += 1
     for svr in info:
         row = list()
         for f in fmtr.field_list:
@@ -1315,6 +1338,34 @@ def gen_field_list_a():
     fl.append(gen_field('ninfo', 'Node Info', None, 'fmta_info',
                         'state comment resources_available partition '
                         'queue resv', 'const'))
+    return fl
+
+
+def gen_field_list_q():
+    '''Generate field list for alternate queue display
+    '''
+    fl = []
+    rc = {'hj': 'c'}
+    rr = {'hj': 'r'}
+    hcdr = {'hj': 'c', 'rj': 'r'}
+    de = {'df': '-'}
+    fl.append(gen_field('q_name', 'Queue', de, 'fmt_id', None))
+    fl.append(gen_field('q_memory', 'Memory', hcdr, 'fmt_from_rsrc',
+                        'resources_max', 'mem'))
+    fl.append(gen_field('q_cput', 'CPU Time', rc, 'fmt_from_rsrc',
+                        'resources_max', 'cput'))
+    fl.append(gen_field('q_wtime', 'Walltime', rc, 'fmt_from_rsrc',
+                        'resources_max', 'walltime'))
+    fl.append(gen_field('q_nodect', 'Node', rr, 'fmt_from_rsrc',
+                        'resources_max', 'nodect'))
+    fl.append(gen_field('q_jrun', 'Run', rr, 'fmt_from_opt',
+                        'state_count', 'running'))
+    fl.append(gen_field('q_jqueue', 'Que', rr, 'fmt_from_opt',
+                        'state_count', 'queued'))
+    fl.append(gen_field('q_lm', 'Lm', rr, 'fmt_by_attr',
+                        'max_running'))
+    fl.append(gen_field('q_state', 'State', rr, 'fmt_short_state',
+                        'enabled started'))
     return fl
 
 

@@ -380,6 +380,13 @@ def fmt_est_end(fi, info):
     return t + guess
 
 
+def fmt_from_opt(fi, info):
+    # Pick info item using opt as key
+    key = fi['opt'][0]
+    rawv = info.get(key, '--')
+    return str(rawv)
+
+
 def fmt_from_rsrc(fi, info):
     # Pick one item out of a resource list
     key = fi['opt'][0]
@@ -597,6 +604,19 @@ def fmt_server_info(fi, info):
     if t and not t == '':
         stuff.append(t)
     return " ".join(stuff)
+
+
+def fmt_short_state(fi, info):
+    # Compose enabled started state of queue
+    enabled = 'D'
+    started = 'S'
+    t = info.get('enabled', 'False')
+    if t == 'True':
+        enabled = 'E'
+    t = info.get('started', 'False')
+    if t == 'True':
+        started = 'R'
+    return " %s %s " % (enabled, started)
 
 
 def fmt_state_count(fi, info):
