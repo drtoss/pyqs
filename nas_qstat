@@ -664,6 +664,8 @@ def display_queues(args, fmtr):
         args = result from argparse of command line
         fmtr = field formatter object
     Returns: 0 on success
+    Note that the -q version of the display adds several lines to each
+    server's display.
     '''
     global opts_W
 
@@ -681,16 +683,18 @@ def display_queues(args, fmtr):
     svr_present = False
     # Get info about queues
     if args.things is None or len(args.things) == 0:
-        conn = ifl.pbs_connect('')
-        if conn < 0:
-            print("Cannot connect to PBS server: %s" %
-                  os.strerror(ifl.get_pbs_errno()),
-                  file=sys.stderr)
-            return 1
-        bs = ifl.pbs_statque(conn, '', fmtr.atl, None)
-        ifl.pbs_disconnect(conn)
-        svr = pbs_conf.pbs_server_name
-        sinfo.append((svr.split('.')[0], bs))
+        sname = pbs_conf.pbs_server_name
+        bs = file_to_stat(sname, 'queues')
+        if bs is None:
+            conn = ifl.pbs_connect(sname)
+            if conn < 0:
+                print("Cannot connect to PBS server: %s" %
+                      os.strerror(ifl.get_pbs_errno()),
+                      file=sys.stderr)
+                return 1
+            bs = ifl.pbs_statque(conn, '', fmtr.atl, None)
+            ifl.pbs_disconnect(conn)
+        sinfo.append((sname.split('.')[0], bs))
     else:
         prev = None
         conn = -1
@@ -700,27 +704,29 @@ def display_queues(args, fmtr):
                 parts.append('')
             else:
                 svr_present = True
-            (qname, svr) = parts[0:2]
-            if svr == '':
-                svr = pbs_conf.pbs_server_name.split('.')[0]
+            (qname, sname) = parts[0:2]
+            if sname == '':
+                sname = pbs_conf.pbs_server_name.split('.')[0]
             new_svr = False
-            if svr != prev:
+            if sname != prev:
                 new_svr = True
                 if conn != -1:
                     ifl.pbs_disconnect(conn)
-                conn = ifl.pbs_connect(svr)
+                conn = ifl.pbs_connect(sname)
                 if conn == -1:
                     print("Cannot connect to PBS server %s: %s" %
-                          (svr, os.errno(ifl.get_pbs_errno())),
+                          (sname, os.strerror(ifl.get_pbs_errno())),
                           file=sys.stderr)
                     prev = None
                     continue
-                prev = svr
-            bs = ifl.pbs_statque(conn, qname, fmtr.atl, None)
+                prev = sname
+            bs = file_to_stat(sname, 'queues')
+            if bs is None:
+                bs = ifl.pbs_statque(conn, qname, fmtr.atl, None)
             if len(bs) == 0:
                 continue
             if new_svr:
-                sinfo.append((svr.split('.')[0], bs))
+                sinfo.append((sname.split('.')[0], bs))
             else:
                 sinfo[-1][1].extend(bs)
         if conn != -1:
@@ -733,27 +739,63 @@ def display_queues(args, fmtr):
     # Deal with state_count field by patching field title and
     # adding 'pretty_sc' attribute to each queue
     if state_count_idx >= 0:
-      for (svr, info) in sinfo:
-         scounts = pretty_state_counts(info)
-         fs = cfg.config[state_count_idx]
-         fs.title[1] = scounts.pop(0)
-         for idx, que in enumerate(info):
-            que['pretty_sc'] = scounts[idx]
-    for (svr, info) in sinfo:
-      rows = []
-      for que in info:
-        row = list()
-        for f in fmtr.field_list:
-            func = getattr(nas_field_format, f['func'])
-            row.append(func(f, que))
-        rows.append(row)
-      if rows:
-        new_section()
-        show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
-        if show_hdr and svr_present:
-            print("\nserver: %s\n" % svr)
-        res = layout.layout(cfg, rows, show_hdr=show_hdr)
-        print('\n'.join([x.rstrip() for x in res]))
+        for (sname, qinfo) in sinfo:
+            scounts = pretty_state_counts(qinfo)
+            fs = cfg.config[state_count_idx]
+            fs.title[1] = scounts.pop(0)
+            for idx, que in enumerate(qinfo):
+                que['pretty_sc'] = scounts[idx]
+    # For -q output, compute queued and running counts
+    if args.q:
+        for (sname, qinfo) in sinfo:
+            for que in qinfo:
+                t = que.get('state_count', None)
+                if t is None:
+                    continue
+                (queued, running) = decode_state_count(t)
+                que['queued'] = queued
+                que['running'] = running
+    # Format selected fields and use layout to present them
+    for (sname, qinfo) in sinfo:
+        rows = []
+        if args.q:
+            for f in fmtr.field_list:
+                if 'sum' in f['opt']:
+                    f['total'] = 0
+        for que in qinfo:
+            row = list()
+            for f in fmtr.field_list:
+                func = getattr(nas_field_format, f['func'])
+                t = func(f, que)
+                row.append(t)
+                if args.q:
+                    if 'sum' in f['opt']:
+                        try:
+                            f['total'] += int(t)
+                        except ValueError:
+                            pass
+            rows.append(row)
+        if rows:
+            new_section()
+            show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
+            if show_hdr and svr_present:
+                print("\nserver: %s\n" % sname)
+                if args.q:
+                    # Add job count sum lines
+                    dsh_row = []
+                    tot_row = []
+                    for f in fmtr.field_list:
+                        if 'sum' in f['opt']:
+                            t = str(f['total'])
+                            dsh_row.append('-' * max(3, len(t)))
+                            tot_row.append(t)
+                        else:
+                            dsh_row.append('')
+                            tot_row.append('')
+                    rows.append(dsh_row)
+                    rows.append(tot_row)
+            res = layout.layout(cfg, rows, show_hdr=show_hdr)
+            print('\n'.join([x.rstrip() for x in res]))
     return 0
 
 
@@ -1359,9 +1401,9 @@ def gen_field_list_q():
     fl.append(gen_field('q_nodect', 'Node', rr, 'fmt_from_rsrc',
                         'resources_max', 'nodect'))
     fl.append(gen_field('q_jrun', 'Run', rr, 'fmt_from_opt',
-                        'state_count', 'running'))
+                        'state_count', 'running sum'))
     fl.append(gen_field('q_jqueue', 'Que', rr, 'fmt_from_opt',
-                        'state_count', 'queued'))
+                        'state_count', 'queued sum'))
     fl.append(gen_field('q_lm', 'Lm', rr, 'fmt_by_attr',
                         'max_running'))
     fl.append(gen_field('q_state', 'State', rr, 'fmt_short_state',
@@ -1599,6 +1641,28 @@ def condense_vnode_info(nodes):
         new_list.append(nat_info)
         new_list.extend(oddballs)
     return new_list
+
+
+def decode_state_count(counts):
+    '''Extract count of queued and running jobs from state_count field
+
+    Args:
+        counts = state_count field
+    Returns:
+        Tuple with integer counts of queued and running jobs.
+    '''
+    queued = 0
+    running = 0
+    for one_count in counts.split():
+        mo = re.match(r'([A-Z])\w+:(\d+)', one_count)
+        if mo:
+            tag = mo.group(1)
+            cnt = int(mo.group(2))
+            if tag in 'HQW':
+                queued += cnt
+            elif tag in 'RB':
+                running += cnt
+    return (queued, running)
 
 
 def extract_job_info(server):
