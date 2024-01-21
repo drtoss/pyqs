@@ -956,7 +956,7 @@ def define_on_the_fly(cur_flds, opts_W, which='o'):
                                     'resources_assigned', name)
             elif pfx == 'RL':
                 new_fld = gen_field(fld_name, title, rj, 'fmt_from_rsrc',
-                                    'resources_used', name)
+                                    'Resource_List', name)
             elif pfx == 'RU':
                 # Job resources used
                 new_fld = gen_field(fld_name, name, rj, 'fmt_from_rsrc',
