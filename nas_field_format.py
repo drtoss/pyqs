@@ -551,6 +551,12 @@ def fmt_queue_info(fi, info):
     t = info.get('started', None)
     if t != 'True':
         stuff.append('stopped')
+    t = info.get('hasnodes', None)
+    if t:
+        stuff.append('has_nodes')
+    t = info.get('comment', None)
+    if t and t != '':
+        stuff.append(t)
     return " ".join(stuff)
 
 
