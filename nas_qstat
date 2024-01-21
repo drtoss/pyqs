@@ -491,8 +491,6 @@ def display_jobs(args, fmtr):
         if alt_disp:
             cache_server(current_server, conn)
             display_server_hdr(current_server, conn, args, opts_W)
-        if gNAS and check_W_int('shares', 0):
-            display_shares(gshare_entity_info)
         # Get info for selected jobs
         sname = current_server.split('.')[0]
         bs = file_to_stat(sname, 'jobs', fmtr.atl)
@@ -513,6 +511,8 @@ def display_jobs(args, fmtr):
                 continue
         if gNAS:
             plug_job_info(bs)
+        if gNAS and check_W_int('shares', 0):
+            display_shares(gshare_entity_info)
         # If interested only in jobs on given host, filter the list
         if host_re:
             newbs = []
@@ -1031,6 +1031,8 @@ def display_server_hdr(server, conn, args, opts_W):
         print(errs, file=sys.stderr)
     if check_W_bool('node_comments', False):
         attr_set.add('comment')
+    if not check_W_bool('node_comments', True):
+        attr_set.discard('comment')
     if check_W_str('condense_vnodes'):
         attr_set.add('resources_available')
     # Adjust formatting of selected fields, per -W fmta_xxx values
@@ -1147,7 +1149,10 @@ def display_shares(emap):
         gross = item['gross']
         net = item['net']
         alloc = item['alloc']
+        demand = item.get('demand', 0)
         if gross == -1:
+            continue
+        if gross == 0 and demand == 0:
             continue
         if totalalloc > 0:
             sharepct = gross * 100 // totalalloc
@@ -1339,7 +1344,7 @@ def gen_field_list_Q():
                         'fmt_state_count', 'state_count'))
     fl.append(gen_field('q_pr', 'pr', dre, 'fmt_by_attr', 'Priority'))
     fl.append(gen_field('q_info', 'Info', de, 'fmt_queue_info',
-                        'enabled started'))
+                        'enabled started hasnodes comment'))
     return fl
 
 
