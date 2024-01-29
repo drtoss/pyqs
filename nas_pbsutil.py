@@ -358,12 +358,27 @@ def display_f(args, info, item_tag, json_tag):
     if args.F == 'json':
         bs_to_json(info, json_tag)
         return 0
+    info_to_file(sys.stdout, info, item_tag)
+    return 0
+
+
+def info_to_file(fd, info, item_tag):
+    '''Write batch status data in -f format
+
+    Args:
+        fd = Open file object to write to
+        info = list of batch status data to display
+        item_tag = tag for each item in -f output
+    '''
     for item in info:
         item_name = item.get('id')
         if not item_name:
             continue
         rows = []
-        rows.append("%s: %s" % (item_tag, item_name))
+        if item_tag:
+            rows.append("%s: %s" % (item_tag, item_name))
+        else:
+            rows.append(item_name)
         for key in filter(lambda x: x not in ignore_attrs, item.keys()):
             attr = item[key]
             if isinstance(attr, str) and '\n' in attr:
@@ -374,8 +389,8 @@ def display_f(args, info, item_tag, json_tag):
                                   time.localtime(int(attr)))
                 row += ' (' + t + ')'
             rows.append(row)
-        print('\n'.join(rows))
-        print()
+        print('\n'.join(rows), file=fd)
+        print(file=fd)
     return 0
 
 
