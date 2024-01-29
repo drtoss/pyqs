@@ -683,7 +683,7 @@ def display_queues(args, fmtr):
     svr_present = False
     # Get info about queues
     if args.things is None or len(args.things) == 0:
-        sname = pbs_conf.pbs_server_name
+        sname = pbs_conf.pbs_server_name.split('.')[0]
         bs = file_to_stat(sname, 'queues')
         if bs is None:
             conn = ifl.pbs_connect(sname)
