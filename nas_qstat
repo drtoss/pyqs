@@ -155,7 +155,7 @@ def main():
                               'resources')
     parser.add_argument('--debug', default=[], action='append',
                         help='Debugging arguments (for developers)')
-    display_type.add_argument('-f', default=False, action='store_true',
+    display_type.add_argument('-f', default=0, action='count',
                               help='Full output')
     parser.add_argument('-i', default=False, action='store_true',
                         help='Select queued, held, or waiting jobs')
@@ -229,8 +229,6 @@ def main():
                 tlist.append(t if isinstance(t, str) else ' '.join(t))
             print('Known field titles', ', '.join(tlist))
 
-    if args.f:
-        default_fields = []
     # Build list of known fields
     opts_W = args.W
     if opts_W is None:
@@ -316,6 +314,8 @@ def main():
     attr_list = (','.join(attr_list)).split(',')
     while '' in attr_list:
         attr_list.remove('')
+    if args.f == 1:
+        attr_list = list()
     if verbose > 2:
         print('Requested attribute list:', ', '.join(attr_list))
     # An empty attribute list is rejected. For servers and queues, just
@@ -1271,7 +1271,7 @@ def gen_field_list():
                         'resources_used Resource_List', 'mem'))
     fl.append(gen_field('minwallt', ['Min', 'wallt'], rj, 'fmt_from_rsrc_tm',
                         'Resource_List', 'min_walltime'))
-    fl.append(gen_field('mission', 'Mission', None, 'fmt_mission', None))
+    fl.append(gen_field('mission', 'Mission', None, 'fmt_mission', 'egroup euser Priority'))
     fl.append(gen_field('model', 'Model', None, 'fmt_model', 'schedselect'))
     fl.append(gen_field('nds', 'Nds', rj, 'fmt_from_rsrc',
                         'resources_used Resource_List', 'nodect'))
