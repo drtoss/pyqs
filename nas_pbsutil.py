@@ -366,6 +366,8 @@ def display_f(args, info, item_tag, json_tag):
         rows.append("%s: %s" % (item_tag, item_name))
         for key in filter(lambda x: x not in ignore_attrs, item.keys()):
             attr = item[key]
+            if isinstance(attr, str) and '\n' in attr:
+                attr = attr.replace('\n', r'\n')
             row = "    %s = %s" % (key, attr)
             if key in time_attrs:
                 t = time.strftime('%a %b %d %X %Z %Y',
