@@ -1188,7 +1188,7 @@ def display_shares(emap):
         else:
             entity_str = ' ' + entity
         sinfo = [entity_str, str(sharepct), usepct_str, str(alloc),
-                 str(exempt), str(shareuse), str(avail), str(borrowed),
+                 str(exempt), str(shareuse), str(avail),
                  ratio_str, str(demand)]
         if share_opts & 2:
             sinfo.append(backlog_str)
@@ -1205,7 +1205,6 @@ def display_shares(emap):
     c.add_field('Exempt', hj='r')
     c.add_field('Use', hj='r')
     c.add_field('Avail', hj='r')
-    c.add_field('Borrowed', hj='r')
     c.add_field('Ratio', hj='r')
     c.add_field('Waiting', hj='r')
     if share_opts & 2:
