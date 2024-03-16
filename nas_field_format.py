@@ -496,6 +496,8 @@ def fmt_lifetime(fi, info):
 def fmt_mission(fi, info):
     global gshare_entity_info
     entity = info.get('share_entity', None)
+    if not entity:
+        entity = info.get('egroup','') + ':' + info.get('euser','')
     t = gshare_entity_info.get(entity, dict())
     leader = t.get('leader', '--')
     return leader
