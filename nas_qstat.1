@@ -82,7 +82,15 @@ section.
 
 .TP
 .B -f
-Display information with one attribute per line
+Display information with one attribute per line. With a single
+.BR -f ,
+all attributes are displayed. If
+.B -f
+is specified twice, only those attributes needed to construct the normal
+output (without
+.BR -f )
+are queried and displayed. This can be significantly faster when
+there are many jobs, etc, to list.
 
 .TP
 .B -i
