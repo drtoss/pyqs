@@ -148,6 +148,8 @@ def main():
         levels += 1
     if args.F:
         levels += 1
+    if args.f:
+        levels += 1
     if args.S:
         levels += 1
     if (levels > 1):
@@ -204,7 +206,7 @@ def main():
     if host_re:
         # If we are filtering by host, make sure we ask for resv_nodes
         attr_list.add('resv_nodes')
-    if args.F:
+    if args.F or args.f:
         attr_list = None
     # Collect the info
     resvs = get_resv_info(args.resvids, attr_list)
