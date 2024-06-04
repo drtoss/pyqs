@@ -593,7 +593,7 @@ def fmt_remaining(fi, info):
 
 def fmt_resv_name(fi, info):
     rawv = fmt_by_attr(fi, info)
-    if rawv == "NULL" or rawv == '--':
+    if rawv == 'NULL' or rawv == '--':
         rawv = info.get('id')
     return rawv
 
