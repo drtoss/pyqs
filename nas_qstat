@@ -982,7 +982,9 @@ def display_server_hdr(server, conn, args, opts_W):
     new_section()
     in_server_header = True
     current_server = info.get('id', server)
-    print(current_server + ':    ', time.asctime(time.localtime()))
+    show_hdr = '-h' not in opts_W and 'noheader' not in opts_W
+    if show_hdr:
+        print(current_server + ':    ', time.asctime(time.localtime()))
     # Create one-line job header
     total_jobs = safeint(info.get('total_jobs', '0'))
     counts = info.get('state_count', '')
@@ -1002,13 +1004,14 @@ def display_server_hdr(server, conn, args, opts_W):
     else:
         done_string = ''
     plural = 's' if jcnt != 1 else ''
-    print(" Server reports %d job%s total (%s)%s" % (jcnt, plural,
-          ' '.join(clist), done_string))
-    # Add any server comment and scheduler status
-    if comment:
-        print("\t", comment)
-    if scheduling != 'True':
-        print("\t+++ Scheduling turned off.")
+    if show_hdr:
+        print(" Server reports %d job%s total (%s)%s" % (jcnt, plural,
+              ' '.join(clist), done_string))
+        # Add any server comment and scheduler status
+        if comment:
+            print("\t", comment)
+        if scheduling != 'True':
+            print("\t+++ Scheduling turned off.")
     # Display info about MoMs
     all_resvs = info.get('resv_info', ())
     fmta_init(all_resvs, userexit_interest)
@@ -1123,10 +1126,12 @@ def display_server_hdr(server, conn, args, opts_W):
     userexit_last_chance_a(globals(), locals())
     # Layout result
     if len(nrows) > 0:
-        new_section()
-        rows = layout.layout(cfg, nrows)
+        if show_hdr:
+            new_section()
+        rows = layout.layout(cfg, nrows, show_hdr=show_hdr)
         for r in rows:
-            print(' ', r.rstrip())
+            indent = ' ' if show_hdr else ''
+            print(indent, r.rstrip(), sep='')
 
 
 def display_shares(emap):
@@ -1282,7 +1287,7 @@ def gen_field_list():
     fl.append(gen_field('qtime', 'Qtime', None, 'fmt_date_full', 'qtime'))
     fl.append(gen_field('queue', 'Queue', None, 'fmt_by_attr', 'queue'))
     fl.append(gen_field('rank0', 'Rank0', None, 'fmt_rank0', 'exec_host'))
-    fl.append(gen_field('reqid', 'ReqID', None, 'fmt_by_attr', 'id'))
+    fl.append(gen_field('reqid', 'ReqID', None, 'fmt_full_id', None))
     fl.append(gen_field('reqmem', 'Reqmem', hlrj, 'fmt_from_rsrc_sz',
                         'Resource_List', 'mem'))
     fl.append(gen_field('remwallt', ['Rem', 'wallt'], rj, 'fmt_remaining',
@@ -1623,9 +1628,16 @@ def condense_vnode_info(nodes):
             cur = ninfo.get(a)
             if nat != cur:
                 nats = set(nat.split(','))
-                curs = set(cur.split(',')) - ignore_states
-                if not curs.issubset(nats):
-                    odd = True
+                curs = set(cur.split(','))
+                if check_W_bool('sum_state'):
+                    nats |= curs
+                    nats -= set(['free'])
+                    nat = ','.join(sorted(nats))
+                    nat_info[a] = nat
+                else:
+                    curs -= ignore_states
+                    if not curs.issubset(nats):
+                        odd = True
             break
         if odd:
             oddballs.append(ninfo)
@@ -1640,6 +1652,11 @@ def condense_vnode_info(nodes):
                 z = a + '.' + r
                 t = safeint(nat_info.get(z, 0)) + safeint(ninfo.get(z, 0))
                 nat_info[z] = str(t)
+        for a in ['jobs']:
+            nats = set(nat_info.get(a, '').split(','))
+            curs = set(ninfo.get(a, '').split(','))
+            nat = ','.join(sorted(nats | curs))
+            nat_info[a] = nat
         # End of condensing
     if nat_info:
         new_list.append(nat_info)
