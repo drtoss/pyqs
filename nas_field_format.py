@@ -450,6 +450,10 @@ def fmt_future_date(fi, info):
     return t
 
 
+def fmt_full_id(fi, info):
+    return info.get('id', '--')
+
+
 def fmt_id(fi, info):
     rawv = info['id']
     return rawv.split('.')[0]
@@ -587,11 +591,31 @@ def fmt_remaining(fi, info):
     return secstoclock(rem, False, ghuman)
 
 
+def fmt_resv_name(fi, info):
+    rawv = fmt_by_attr(fi, info)
+    if rawv == "NULL" or rawv == '--':
+        rawv = info.get('id')
+    return rawv
+
+
 def fmt_resv_state(fi, info):
     rawv = fmt_by_attr(fi, info)
     if rawv.isdigit():
         return decode_resv_state(rawv)
     return decode_resv_state_str(rawv)
+
+def fmt_resv_states(fi, info):
+    rawv = info.get('reserve_state', '--')
+    if rawv.isdigit():
+        st = decode_resv_state(rawv)
+    else:
+        st = rawv
+    rawv = info.get('reserve_substate', '--')
+    if rawv.isdigit():
+        sst = decode_resv_state(rawv)
+    else:
+        sst = rawv
+    return st + '/' + sst
 
 
 def fmt_seqno(fi, info):
