@@ -977,6 +977,9 @@ def define_on_the_fly(cur_flds, opts_W, which='o'):
                 # Node resources available
                 new_fld = gen_field(fld_name, title, rj, 'fmt_from_rsrc',
                                     'resources_available', name)
+            elif pfx == 'RE':
+                new_fld = gen_field(fld_name, title, rj, 'fmt_from_rsrc',
+                                    'estimated', name)
             elif pfx == 'RI':
                 new_fld = gen_field(fld_name, title, rj, 'fmt_from_rsrc',
                                     'resources_assigned', name)
