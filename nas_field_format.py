@@ -730,7 +730,10 @@ def fmta_info(fi, minfo):
     '''Format interesting info about MoM'''
     global allresvs
     mom_name = minfo.get('id', '??')
-    comment = minfo.get('comment', '')
+    if check_W_bool('node_comments', False):
+        comment = minfo.get('comment', '')
+    else:
+        comment = ''
     partition = minfo.get('partition', '')
     queue = minfo.get('queue', '')
     resvs = [x.strip() for x in minfo.get('resv', '').split(',')]
