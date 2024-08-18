@@ -61,6 +61,28 @@ def check_perms():
             t = os.path.abspath(t)
             if t not in sys.path:
                 sys.path.insert(0, t)
+            # If path ends in bin, try to add equivalent lib directory
+            (head,tail) = os.path.split(t)
+            if tail != 'bin':
+                continue
+            t = os.path.join(head, 'lib')
+            if t in sys.path:
+                # Already there
+                continue
+            if not os.path.exists(t):
+                continue
+            # Repeat some security checks
+            try:
+                sb = os.lstat(t)
+            except OSError:
+                continue
+            if not stat.S_ISDIR(sb.st_mode):
+                continue
+            mode = stat.S_IMODE(sb.st_mode)
+            if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
+                continue
+            # Add lib to path
+            sys.path.insert(1, t)
             continue
         if "' from '" in src:
             # Reject things that others can modify
