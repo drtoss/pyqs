@@ -393,14 +393,15 @@ The known fields can be changed by the site administrator or by the user.
 The current list is acct, aoe, cnt, cpct, cput, ctime, eff, elapwallt, eligtime, eligwait, estend, eststart, exitstatus, group, jobid, jobname, lifetime, maxwallt, memory, minwallt, mission, model, nds, place, pmem, pri, qtime, queue, rank0, reqid, reqmem, remwallt, reqdwallt, runs, s, sessid, seqno, ss, stime, tsk, user, vmem.
 
 If the attribute or resource of interest is not in the known
-field list, it can be requested by using a field name of 'A_xyz', 'RL_xyz',
-or 'RU_xyz'.
+field list, it can be requested by using a field name of 'A_xyz', 'RE_xyz',
+ 'RL_xyz', or 'RU_xyz'.
 The
 .I 'xyz'
 portion of the field name specifies the attribute or resource,
 and must be typed exactly as it appears in qstat -f output.
 The 'A_' prefix indicates a job attribute; 'RL_' is for
-a quantity from the job 'Resource_List' attribute; and 'RU_' refers
+a quantity from the job 'Resource_List' attribute;
+ 'RE_' is for job estimated resources; and 'RU_' refers
 to 'resources_used' by running or completed jobs.
 
 So, for example, to include the Rerunable attribute for jobs, use
