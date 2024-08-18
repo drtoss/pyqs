@@ -493,7 +493,11 @@ def display_jobs(args, fmtr):
             display_server_hdr(current_server, conn, args, opts_W)
         # Get info for selected jobs
         sname = current_server.split('.')[0]
-        bs = file_to_stat(sname, 'jobs', fmtr.atl)
+        skip_jobs = check_W_bool('skip_jobs')
+        if skip_jobs:
+            bs = []
+        else:
+            bs = file_to_stat(sname, 'jobs', fmtr.atl)
         if bs is None:
             namelist = ','.join(names)
             if sel_attr:
@@ -1070,10 +1074,9 @@ def display_server_hdr(server, conn, args, opts_W):
                 if conn is not None:
                     mom_info = ifl.pbs_statvnode(conn, None, atl, None)
             # Condense vnode info into natural vnodes if desired
-            condense = check_W_bool('condense_vnodes', None)
-            if condense is None:
-                condense = sname in check_W_str('condense_vnodes').split(',')
-            if condense:
+            cv = check_W_str('condense_vnodes', '')
+            cvhosts = re.split(r'[\s,]+', cv)
+            if sname in cvhosts or check_W_bool('condense_vnodes'):
                 mom_info = condense_vnode_info(mom_info)
         info['mom_info'] = mom_info
     mom_list = []
@@ -1602,7 +1605,8 @@ def condense_vnode_info(nodes):
     nat_name = None
     oddballs = list()
     new_list = list()
-    ignore_states = set(['free', 'job-exclusive', 'job-busy'])
+    ignore_states = set(['free'])
+    merge_states = check_W_bool('merge_states')
     for ninfo in sorted(nodes, key=cmpf):
         cur_name = ninfo.get('resources_available.host', '').split('.')[0]
         if cur_name != nat_name:
@@ -1629,7 +1633,7 @@ def condense_vnode_info(nodes):
             if nat != cur:
                 nats = set(nat.split(','))
                 curs = set(cur.split(','))
-                if check_W_bool('sum_state'):
+                if merge_states:
                     nats |= curs
                     nats -= set(['free'])
                     nat = ','.join(sorted(nats))

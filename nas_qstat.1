@@ -316,6 +316,16 @@ When time durations are displayed, convert durations over 48 hours to
 days.
 
 .TP
+.B merge_states
+When using the
+.B condense_vnodes
+option for the
+.B -a
+display, the
+.B merge_states
+option merges the states of all vnodes into the natural node's state.
+
+.TP
 .B model
 At NAS, include the node model type in the
 .I info
@@ -438,6 +448,13 @@ fields can be added to this list using special names for the fields. In
 this case, 'A_xyz', 'RA_xyz', or 'RI_xyz'. The 'A_' prefix selects a
 node attribute; 'RA_' selects a resources_available quantity; and 'RI_'
 selects resources_assigned ("In use").
+
+.TP
+.B skip_jobs
+Used with the
+.B -a
+option to limit output to just the node info.
+No job status is collected/displayed.
 
 .SH EXIT STATUS
 Normally returns 0. Returns 1 on errors (e.g., nonexistent queue or jobid).
