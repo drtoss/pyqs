@@ -6,6 +6,7 @@ source /etc/pbs.conf
 PATH=~dtalcott/swig/bin:$PATH
 # Point repo at sources used to build current pbs_python
 repo=~dtalcott/work/drtoss
+defs="-DNAS"
 
 # Extract pieces needed to define pbs_conf structure
 
@@ -13,10 +14,10 @@ repo=~dtalcott/work/drtoss
 	grep "^#define.*MAXAUTHNAME" ${repo}/src/include/libauth.h
 	sed -n -e '/struct pbs_config/,/extern struct pbs_config/p' \
 		$repo/src/include/pbs_internal.h | \
-	grep -v psi_t
+	sed -e 's/psi_t/void/'
 ) > my_pbsconf.h
 
-swig -python -I${repo}/src/include ./pbs_ifl.i
+swig -python -I${repo}/src/include ${defs} ./pbs_ifl.i
 
 t=$(pbs_python --version)
 version=${t#pbs_version = }
@@ -24,10 +25,12 @@ case ${t#pbs_version = } in
 	(20.*)	sfx="3.*" ;;
 	(19.*)	sfx="2.*" ;;
 esac
+sfx=3.6m
 gcc -g -O0 -Wall -Wno-unused-variable -fPIC -shared \
 	-I ${repo}/src/include \
 	-I /usr/include/python${sfx} \
 	-D PBS_VERSION='"'$version'"' \
+	${defs} \
 	-L ${PBS_EXEC}/lib \
 	-lpbs \
 	-Wl,-rpath=${PBS_EXEC}/lib \
