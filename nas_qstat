@@ -59,7 +59,13 @@ def check_perms():
             # add the directory where the script
             # resides back to sys.path, if
             # the -I flag removed it.
+            # First, though, deal with invoked through symlink.
             t = os.path.dirname(path)
+            sb = os.lstat(path)
+            if stat.S_ISLNK(sb.st_mode):
+                r = os.readlink(path)
+                t = os.path.join(t, r)
+                t = os.path.dirname(t)
             t = os.path.abspath(t)
             if t not in sys.path:
                 sys.path.insert(0, t)
