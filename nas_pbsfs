@@ -1,0 +1,634 @@
+#!/usr/bin/python3 -I
+
+'''Display information about Altair fairshares
+
+This command displays information about PBS fairshares. It is similar
+to pbsfs, but accepts field selections similarly to nas_qstat.
+Unlike pbsfs, it is display only. Use pbsfs to alter fairshare entries.
+'''
+
+# Because this program might be run as root, or with
+# a random environment, check for some conditions that
+# might cause security issues.
+
+
+def check_perms():
+    import sys
+    import os
+    import stat
+    user = os.getuid()
+    # First, clean up python search path by removing
+    # dodgy entries.
+    newp = []
+    for x in sys.path:
+        if x == '':
+            continue
+        try:
+            sb = os.stat(x)
+        except OSError:
+            continue
+        # Skip items not owned by root, unless
+        # running as the owner of the item.
+        if sb.st_uid != 0 and user != sb.st_uid:
+            continue
+        # Skip non-directories in path
+        if not stat.S_ISDIR(sb.st_mode):
+            continue
+        # Skip things that others can modify
+        mode = stat.S_IMODE(sb.st_mode)
+        if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
+            continue
+        if x not in newp:
+            newp.append(x)
+    # Update sys.path to what is left
+    sys.path.clear()
+    sys.path.extend(newp)
+
+    # Now, check that we haven't already loaded
+    # suspect items.
+    for name, val in sys.modules.items():
+        src = str(val)
+        pcs = src.split()
+        pathpart = pcs[-1]
+        path = pathpart[1:-2]
+        if path in ['built-in', 'frozen']:
+            continue
+        if name == '__main__':
+            # For debugging, we might need to
+            # add the directory where the script
+            # resides back to sys.path, if
+            # the -I flag removed it.
+            # First, though, deal with invoked through symlink.
+            t = os.path.dirname(path)
+            sb = os.lstat(path)
+            if stat.S_ISLNK(sb.st_mode):
+                r = os.readlink(path)
+                t = os.path.join(t, r)
+                t = os.path.dirname(t)
+            t = os.path.abspath(t)
+            if t not in sys.path:
+                sys.path.insert(0, t)
+            # If path ends in bin, try to add equivalent lib directory
+            (head, tail) = os.path.split(t)
+            if tail != 'bin':
+                continue
+            t = os.path.join(head, 'lib')
+            if t in sys.path:
+                # Already there
+                continue
+            if not os.path.exists(t):
+                continue
+            # Repeat some security checks
+            try:
+                sb = os.lstat(t)
+            except OSError:
+                continue
+            if not stat.S_ISDIR(sb.st_mode):
+                continue
+            mode = stat.S_IMODE(sb.st_mode)
+            if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
+                continue
+            # Add lib to path
+            sys.path.insert(1, t)
+            continue
+        if "' from '" in src:
+            # Reject things that others can modify
+            sb = os.stat(path)
+            if sb.st_uid != 0 and user != sb.st_uid:
+                raise OSError("Unsafe PYTHONPATH with " + path)
+            mode = stat.S_IMODE(sb.st_mode)
+            if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
+                raise OSError("Unsafe PYTHONPATH with " + path)
+    return True
+
+
+if check_perms():
+    # These imports are indented this way just to avoid gripes from
+    # PEP-8 checkers.
+    import sys
+    import os
+    import argparse
+    import copy
+    import re
+    import signal
+    import socket
+    import stat
+    import struct
+    import time
+    from sys import stdout, stderr
+
+    import nas_xstat_config as conf
+    import pbs_ifl as ifl
+    from nas_pbsutil import *
+    import nas_layout as layout
+    import nas_field_format
+    from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
+
+long_desc = __doc__
+debug = ''
+version = "0.1"
+share_name_map = dict()
+share_id_map = dict()
+
+unknown_alloc = 10  # XXX should load from sched_conf
+# Constants
+FAIRSHARE_ROOT_NAME = 'TREEROOT'
+UNKNOWN_GROUP_NAME = 'unknown'
+UNSPECIFIED = None
+MAGIC_NAME = 'PBS_MAG!'
+
+
+class Share:
+    def __init__(self, name, par_id, grp_id):
+        self.name = name
+        self.par_id = par_id
+        self.grp_id = grp_id
+        self.alloc = UNSPECIFIED
+        self.tree_pct = 0.0
+        self.grp_pct = 0.0
+        self.usage = 1.0
+        self.usage_factor = 0.0
+        self.grp_path = list()
+        self.parent = None
+        self.sibling = None
+        self.child = None
+
+
+def main():
+    global version, debug, shost, hostname, pbs_exec, pbs_home
+    global sched_priv, groups_file, usage_file
+    # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
+    for i in range(1, signal.NSIG):
+        try:
+            signal.signal(i, signal.SIG_DFL)
+        except OSError:
+            pass
+    prog = sys.argv[0].split('/')[-1]
+    parser = argparse.ArgumentParser(
+        description=long_desc, prog=prog,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('--debug', default=[], action='append',
+                        help='Debugging arguments (for developers)')
+    parser.add_argument('-f', default=False, action='store_true',
+                        help='output one line per attribute')
+    parser.add_argument('--verbose', '-v', default=0, action='count',
+                        help='increase debugging verbosity')
+    parser.add_argument('--version', action='version',
+                        version='%(prog)s ' + version)
+    parser.add_argument('-W', action='append', metavar='display_option',
+                        help='options affecting field selection and display.'
+                        ' See nas_qstat.1')
+    parser.add_argument('shares', nargs=argparse.REMAINDER,
+                        help='shares to list')
+
+    args = conf.args = parser.parse_args()
+    conf.verbose = verbose = args.verbose
+    conf.gebug = debug = ' '.join(args.debug)
+
+    if (ifl.pbs_loadconf(0) == 0):
+        print("Cannot get PBS configuration information", file=sys.stderr)
+        return 1
+    conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
+    pbs_home = pbs_conf.pbs_home_path
+    pbs_exec = pbs_conf.pbs_exec_path
+    hostname = pbs_conf.pbs_server_name
+    shost = hostname.split('.')[0]
+    sched_priv = os.path.join(pbs_home, 'sched_priv')
+    groups_file = os.path.join(sched_priv, 'resource_group')
+    usage_file = os.path.join(sched_priv, 'usage')
+    do_debugging()
+
+    default_fields = ['name', 'par_id', 'grp_id', 'alloc', 'usage', 'perc']
+    conf.verbose = args.verbose
+    levels = 0
+    if (levels > 1):
+        print("Use only one of TODO B, F, S, f", file=sys.stderr)
+        return 1
+    # Build list of known fields
+    opts_W = args.W
+    if opts_W is None:
+        opts_W = list()
+    conf.opts_W = opts_W
+    # Load possible user or system overrides
+    more_code = load_userexits('pbsfs')
+    if more_code:
+        prog = compile(more_code, 'userexit code', 'exec')
+        exec(prog, globals(), locals())
+    default_W = []
+    userexit_post_opts(globals(), locals())
+    opts_W[0:0] = default_W
+    known_fields = gen_field_list()
+    # Scan opts_W for on-the-fly field defs
+    define_on_the_fly(known_fields, opts_W)
+    fmtr = NAS_field_format(default_fields)
+    fmtr.known_fields = known_fields
+    userexit_add_fields(globals(), locals())
+    # Handle -W options
+    (field_list, attr_list, errs) = fmtr.collect_fields()
+    if (errs):
+        # Check if should just print list of fields
+        if field_list is None:
+            print('\n'.join(errs))
+            return 0
+        print(errs, file=sys.stderr)
+    rc = fmtr.adjust_formats(field_list)
+    if rc is not True:
+        print(rc, file=sys.stderr)
+        return 1
+    fmtr.field_list = field_list
+    nas_field_format.set_field_vars(opts_W)
+    # Build resource_group tree
+    root = load_resource_groups()
+    if root is None:
+        sys.exit(1)
+    # Insert usage info
+    load_usage(root)
+    reconcile(root)
+    if args.f:
+        display_f(args, root, "Group Name", "Group")
+    # Display it
+    display_standard(root, fmtr)
+    return 0
+
+
+def display_f(args, root, item_tag, json_tag):
+    return 0
+
+
+def display_standard(root, fmtr):
+    '''Output info in standard format
+    TODO
+    Args:
+        root = tree of info for share groups
+        fmtr = field formatter object
+    '''
+    c = layout.Config()
+    for fld in fmtr.field_list:
+        title = fld['title']
+        if not title:
+            title = fld['name']
+        c.add_field(title, ident=fld['name'], **fld['format'])
+    rows = list()
+    for share in share_id_map.values():
+        row = list()
+        for f in fmtr.field_list:
+            func = globals().get(f['func'], None)
+            if not func:
+                print(f"Missing defn for function {f['func']}")
+                continue
+            row.append(func(f, share))
+        rows.append(row)
+    if rows:
+        show_hdr = '-h' not in conf.opts_W
+        res = layout.layout(c, rows, show_hdr=show_hdr)
+        print('\n'.join([x.rstrip() for x in res]))
+
+
+def gen_field_list():
+    '''Generate list of known fields
+
+    Returns: list of field_info dicts for known fields
+    The dict have these key/value pairs
+        name: the name of the field
+        format: dict suitable for passing to layout.add_field()
+        func: name of function to calculate display value
+        sources: reservation attributes whose values are needed by func
+    '''
+    fl = []
+    hjr = {'hj': 'r'}
+    fl.append(gen_field('name', 'Name', None, 'fmt_fs_name', 'name'))
+    fl.append(gen_field('par_id', 'Parent', hjr, 'fmt_fs_int', 'par_id'))
+    fl.append(gen_field('grp_id', 'Grp_id', hjr, 'fmt_fs_int', 'grp_id'))
+    fl.append(gen_field('alloc', 'Shares', hjr, 'fmt_fs_int', 'alloc'))
+    fl.append(gen_field('usage', 'Usage', hjr, 'fmt_fs_usage', 'usage'))
+    fl.append(gen_field('perc', 'Perc', hjr, 'fmt_fs_pct', 'grp_pct'))
+    fl.append(gen_field('factor', 'Factor', hjr, 'fmt_fs_factor',
+                        'usage_factor'))
+    return fl
+
+
+def check_W_str(name, default=''):
+    namee = name + '='
+    # Last match decides, so search backward
+    for idx in range(len(conf.opts_W) - 1, -1, -1):
+        wopt = conf.opts_W[idx]
+        # Option by itself is default
+        if wopt == name:
+            return default
+        # Examine name=value
+        if not wopt.startswith(namee):
+            continue
+        val = wopt[len(namee):]
+        return val
+    return default
+
+
+def do_debugging():
+    '''Help debugging the program
+
+    Examine an environment variable for overrides to selected paths.
+    '''
+    global debug, mom_priv, pbs_exec, pbs_home
+    debugstr = os.getenv('NAS_PBSFS_DEBUG')
+    if not debugstr:
+        debugstr = ''
+    debugstr = debug + ' ' + debugstr
+    mo = re.search(r'\bdebug\b', debugstr)
+    debug = True if mo else False
+    # Path overrides:
+    for s in re.split(r'[\s,]+', debugstr):
+        mo = re.match(r'(\w+)=(.+)', s)
+        if not mo:
+            continue
+        (name, path) = mo.group(1, 2)
+        if '/' not in path:
+            continue
+        globals()[name] = path
+    return
+
+
+def calc_fs_factor(tree):
+    '''Calculate usage factor for tree
+
+    The factor takes each node's usage and part of its parent's usage
+    into account
+
+    Args:
+        tree = base of tree to work on
+    '''
+    if not tree:
+        return
+    share = tree.child
+    while share:
+        share.usage_factor = share.usage / tree.usage
+        calc_fs_fact_helper(tree, share.child)
+        share = share.sibling
+
+
+def calc_fs_fact_helper(root, child):
+    '''Helper routine to recurse through tree at root
+
+    Args:
+        root = base of tree to work on
+        child = a node in the tree to start with
+    '''
+    if not root or not child:
+        return
+    parent = child.parent
+    if not parent:
+        return
+    portion = child.usage / root.usage
+    child.usage_factor = portion + \
+        (parent.usage_factor - portion) * child.grp_pct
+    calc_fs_fact_helper(root, child.sibling)
+    calc_fs_fact_helper(root, child.child)
+
+
+def calc_fs_percent(root, alloc):
+    '''Calc group share percent of total
+
+    Args:
+        root = base of subtree
+        alloc = allocation for the group
+            UNSPECIFIED implies calculate it
+    '''
+
+    if not root or not root.parent:
+        return
+    cur_alloc = alloc if alloc != UNSPECIFIED else count_alloc(root)
+    parent = root.parent
+    # Detect no alloc
+    if cur_alloc * parent.tree_pct == 0:
+        root.grp_pct = 0.0
+        root.tree_pct = 0.0
+    else:
+        root.grp_pct = float(root.alloc) / cur_alloc
+        root.tree_pct = root.grp_pct * parent.tree_pct
+    calc_fs_percent(root.sibling, cur_alloc)
+    calc_fs_percent(root.child, UNSPECIFIED)
+
+
+def count_alloc(share):
+    '''Count allocations in a group
+
+    The group includes the share and all of its sibs
+
+    Args:
+        share = the start of a sib list
+    Returns:
+        sum of the allocations for the sib list
+    '''
+    tot_alloc = 0
+    while share:
+        if share.alloc:
+            tot_alloc += share.alloc
+        share = share.sibling
+    return tot_alloc
+
+
+def fmt_fs_factor(fi, info):
+    val = info.usage_factor
+    return "%0.2f" % val
+
+
+def fmt_fs_int(fi, info):
+    t = fi['sources'][0]
+    val = getattr(info, t)
+    return str(val)
+
+
+def fmt_fs_name(fi, info):
+    return info.name
+
+
+def fmt_fs_pct(fi, info):
+    t = fi['sources'][0]
+    val = getattr(info, t) * 100.0
+    return "%3.2f%%" % val
+
+
+def fmt_fs_usage(fi, info):
+    usage = info.usage
+    return "%.2f" % usage
+
+
+def load_resource_groups():
+    '''Read the list of fairshare groups and allocations
+
+    Note an odd use of numeric id's. In the resource_group file, the
+    numeric id (second column) is called the group of any children of
+    the current group. More logical would be to call it the id of the
+    group. The use is the same.
+
+    Returns:
+        A tree of the groups, linkage is by group id
+    '''
+
+    # Construct tree root
+
+    root = new_group(FAIRSHARE_ROOT_NAME, -1, 0)
+    share_name_map['root'] = root
+    unknown = new_group(UNKNOWN_GROUP_NAME, 0, 1)
+    unknown.alloc = unknown_alloc
+    # Now read the remaining groups from the resource_group file
+    err_cnt = 0
+    with open(groups_file, 'r') as fd:
+        line_no = 0
+        for line in fd.readlines():
+            line_no += 1
+            if err_cnt > 10:
+                print(f'Excessive errors, giving up at line {line_no}',
+                      file=stderr)
+                return None
+            # Discard comments
+            line = line.partition('#')[0]
+            if line == '' or line.isspace():
+                continue
+            # Split into four fields
+            flds = line.split()
+            if len(flds) != 4:
+                print(f'Wrong format at line {line_no}', file=stderr)
+                err_cnt += 1
+                continue
+            (name, grp_id, parent, alloc) = flds
+            # Do sanity checks on fields
+            if not name.isidentifier():
+                print(f'Bad group name {name} at line {line_no}', file=stderr)
+                err_cnt += 1
+                continue
+            e_cnt = err_cnt
+            try:
+                grp_id = int(grp_id)
+            except Exception:
+                print(f'Non-integer grp_id {grp_id} as line {line_no}',
+                      file=stderr)
+                err_cnt += 1
+            if not parent.isidentifier():
+                print(f'Bad parent name {parent} at line {line_no}',
+                      file=stderr)
+                err_cnt += 1
+            try:
+                alloc = int(alloc)
+            except Exception:
+                print(f'Non-integer grp_id {grp_id} as line {line_no}',
+                      file=stderr)
+                err_cnt += 1
+            if e_cnt != err_cnt:
+                continue
+            # Now do semantic checks
+            if name in share_name_map:
+                print(f'Duplicate share name {name}', file=stderr)
+                err_cnt += 1
+                continue
+            if grp_id in share_id_map:
+                print(f'Group id already in use: {grp_id}', file=stderr)
+                err_cnt += 1
+                continue
+            if parent not in share_name_map:
+                print(f'Unknown parent share {parent} at {line_no}',
+                      file=stderr)
+                err_cnt += 1
+                continue
+            par_id = share_name_map[parent].grp_id
+            share = new_group(name, par_id, grp_id)
+            share.alloc = alloc
+        if err_cnt:
+            return None
+    return root
+
+
+def load_usage(root):
+    '''Read group use data from file
+
+    Args:
+        root = root of shares tree
+    '''
+    with open(usage_file, 'rb') as fd:
+        buf = fd.read()
+    hdr_fmt = '9sdl'
+    sz = struct.calcsize(hdr_fmt)
+    header = struct.unpack(hdr_fmt, buf[0:sz])
+    # The stuff with partition is because the string fields are zero filled
+    # and we need to truncate at the first zero.
+    magic = str(header[0].partition(b'\0')[0], encoding='utf-8')
+    if magic != MAGIC_NAME or header[1] != 2.0:
+        print(f"Bad usage file header: {usage_file}", file=stderr)
+        sys.exit(1)
+    use_fmt = '50sd'
+    for entry in struct.iter_unpack(use_fmt, buf[sz:]):
+        name = str(entry[0].partition(b'\0')[0], encoding='utf-8')
+        if name not in share_name_map:
+            print(f'Usage for unknown share ignored: {name}')
+            continue
+        share_name_map[name].usage = entry[1]
+    return
+
+
+def new_group(name, par_id, grp_id):
+    '''Create a new share object
+
+    Initialized to default values
+
+    Args:
+        name = name of the share
+        par_id = resource group this child belongs to
+        grp_id = resource group of any children
+
+    Returns:
+        Partially filled-out share object
+        Object added to share_maps
+    '''
+    share = Share(name, par_id, grp_id)
+    share_name_map[name] = share
+    share_id_map[grp_id] = share
+    return share
+
+
+def reconcile(root):
+    '''Fill in a bare share tree
+
+    Args:
+        root = root of the tree
+    Returns:
+        True if no problems found
+        False if errors reported.
+    '''
+    # First, build parent, sibling, and child links
+    for (name, share) in share_name_map.items():
+        par_id = share.par_id
+        if par_id < 0:
+            continue
+        parent = share_id_map[par_id]
+        share.sibling = parent.child
+        parent.child = share
+        share.parent = parent
+        share.par_id = parent.grp_id
+        # Now, build the paths from the share to the root
+    for (name, share) in share_name_map.items():
+        share.grp_path = create_group_path(share)
+    # Fill in special shares: root and unknown
+    root = share_name_map[FAIRSHARE_ROOT_NAME]
+    root.tree_pct = 1.0
+    root.alloc = 0
+    tot_alloc = sum([share.alloc for share in share_id_map.values()])
+    root.alloc = tot_alloc
+    unk = share_name_map[UNKNOWN_GROUP_NAME]
+    unk.alloc = unknown_alloc
+    calc_fs_percent(root.child, UNSPECIFIED)
+    calc_fs_factor(root)
+    return True
+
+
+def create_group_path(share):
+    path = list()
+    while share:
+        path.insert(0, share.name)
+        share = share.parent
+    return path
+
+
+if __name__ == '__main__':
+    sys.exit(main())
+
+# vi:ts=4:sw=4:expandtab
