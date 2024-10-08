@@ -141,21 +141,23 @@ MAGIC_NAME = 'PBS_MAG!'
 class Share:
     def __init__(self, name, par_id, grp_id):
         self.name = name
-        self.par_id = par_id
-        self.grp_id = grp_id
-        self.alloc = UNSPECIFIED
-        self.tree_pct = 0.0
-        self.grp_pct = 0.0
-        self.usage = 1.0
-        self.usage_factor = 0.0
-        self.grp_path = list()
-        self.parent = None
-        self.sibling = None
-        self.child = None
+        self.par_id = par_id        # resgroup
+        self.grp_id = grp_id        # cresgroup
+        self.alloc = UNSPECIFIED    # shares
+        self.tree_pct = 0.0         # tree_percentage
+        self.grp_pct = 0.0          # shares/group_shares
+        self.usage = 1.0            # usage in fairshare_rec units
+        self.usage_factor = 0.0     # actual usage vs allocation (range 0 - 1)
+        self.grp_path = list()      # path from root to node
+        self.parent = None          # link up the tree
+        self.sibling = None         # chain of nodes with same parent as us
+        self.child = None           # link to head of our sibling chain
+        self.fs_factor = 0.0
+        self.depth = 0              # indent to print in tree form
 
 
 def main():
-    global version, debug, shost, hostname, pbs_exec, pbs_home
+    global args, version, debug, shost, hostname, pbs_exec, pbs_home
     global sched_priv, groups_file, usage_file
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, signal.NSIG):
@@ -172,6 +174,8 @@ def main():
                         help='Debugging arguments (for developers)')
     parser.add_argument('-f', default=False, action='store_true',
                         help='output one line per attribute')
+    parser.add_argument('-t', default=False, action='store_true',
+                        help='display as tree')
     parser.add_argument('--verbose', '-v', default=0, action='count',
                         help='increase debugging verbosity')
     parser.add_argument('--version', action='version',
@@ -199,7 +203,7 @@ def main():
     usage_file = os.path.join(sched_priv, 'usage')
     do_debugging()
 
-    default_fields = ['name', 'par_id', 'grp_id', 'alloc', 'usage', 'perc']
+    default_fields = ['name', 'par_id', 'grp_id', 'alloc', 'usage', 'perc', 'factor']
     conf.verbose = args.verbose
     levels = 0
     if (levels > 1):
@@ -263,6 +267,7 @@ def display_standard(root, fmtr):
         root = tree of info for share groups
         fmtr = field formatter object
     '''
+    global args
     c = layout.Config()
     for fld in fmtr.field_list:
         title = fld['title']
@@ -270,7 +275,7 @@ def display_standard(root, fmtr):
             title = fld['name']
         c.add_field(title, ident=fld['name'], **fld['format'])
     rows = list()
-    for share in share_id_map.values():
+    for share in depth_first(root, 0) if args.t else share_id_map.values():
         row = list()
         for f in fmtr.field_list:
             func = globals().get(f['func'], None)
@@ -302,9 +307,9 @@ def gen_field_list():
     fl.append(gen_field('grp_id', 'Grp_id', hjr, 'fmt_fs_int', 'grp_id'))
     fl.append(gen_field('alloc', 'Shares', hjr, 'fmt_fs_int', 'alloc'))
     fl.append(gen_field('usage', 'Usage', hjr, 'fmt_fs_usage', 'usage'))
-    fl.append(gen_field('perc', 'Perc', hjr, 'fmt_fs_pct', 'grp_pct'))
-    fl.append(gen_field('factor', 'Factor', hjr, 'fmt_fs_factor',
-                        'usage_factor'))
+    fl.append(gen_field('perc', 'Perc', hjr, 'fmt_fs_pct', 'tree_pct'))
+    fl.append(gen_field('factor', 'Factor', hjr, 'fmt_fs_factor', 'fs_factor'))
+    fl.append(gen_field('foo', 'Factor', hjr, 'fmt_fs_factor', 'usage_factor'))
     return fl
 
 
@@ -381,6 +386,11 @@ def calc_fs_fact_helper(root, child):
     portion = child.usage / root.usage
     child.usage_factor = portion + \
         (parent.usage_factor - portion) * child.grp_pct
+    if child.tree_pct == 0:
+        child.fs_factor = 0
+    else:
+        print(f'{child.name} {child.usage_factor} {child.tree_pct}')
+        child.fs_factor = pow(2, -(child.usage_factor / child.tree_pct))
     calc_fs_fact_helper(root, child.sibling)
     calc_fs_fact_helper(root, child.child)
 
@@ -426,9 +436,29 @@ def count_alloc(share):
         share = share.sibling
     return tot_alloc
 
+def depth_first(tree, depth):
+    '''Visit tree in depth first order
+
+    Args:
+        tree to visit
+            nodes will have their depth value updated
+    Returns
+        Tree nodes in depth_first order.
+    '''
+    if not tree:
+        return []
+    tree.depth = depth
+    clist = depth_first(tree.child, depth+1)
+    slist = depth_first(tree.sibling, depth)
+    t = [tree]
+    t += clist
+    t += slist
+    return t
+
 
 def fmt_fs_factor(fi, info):
-    val = info.usage_factor
+    t = fi['sources'][0]
+    val = getattr(info, t)
     return "%0.2f" % val
 
 
@@ -439,7 +469,11 @@ def fmt_fs_int(fi, info):
 
 
 def fmt_fs_name(fi, info):
-    return info.name
+    global args
+    val = info.name
+    if args.t:
+        val = ' ' * info.depth + val
+    return val
 
 
 def fmt_fs_pct(fi, info):
@@ -451,6 +485,39 @@ def fmt_fs_pct(fi, info):
 def fmt_fs_usage(fi, info):
     usage = info.usage
     return "%.2f" % usage
+
+
+def insert_child(parent, child):
+    '''Add a child to a share's child chain
+
+    In alphabetical order
+
+    Args:
+        parent = share to add child to
+        child = child to add
+    '''
+    name = child.name
+    cur_child = parent.child
+    # Deal with first child
+    if not cur_child:
+        child.sibling = None
+        parent.child = child
+        return
+    # If new child fits in at beginning
+    if name < cur_child.name:
+        child.sibling = cur_child
+        parent.child = child
+        return
+    # Scan sib chain to find where to insert
+    while cur_child:
+        if name > cur_child.name:
+            prev = cur_child
+            cur_child = cur_child.sibling
+            continue
+        break
+    child.sibling = cur_child
+    prev.sibling = child
+    return
 
 
 def load_resource_groups():
@@ -469,8 +536,6 @@ def load_resource_groups():
 
     root = new_group(FAIRSHARE_ROOT_NAME, -1, 0)
     share_name_map['root'] = root
-    unknown = new_group(UNKNOWN_GROUP_NAME, 0, 1)
-    unknown.alloc = unknown_alloc
     # Now read the remaining groups from the resource_group file
     err_cnt = 0
     with open(groups_file, 'r') as fd:
@@ -535,6 +600,9 @@ def load_resource_groups():
             share.alloc = alloc
         if err_cnt:
             return None
+    # Add the unknown group at end
+    unknown = new_group(UNKNOWN_GROUP_NAME, 0, 1)
+    unknown.alloc = unknown_alloc
     return root
 
 
@@ -594,17 +662,16 @@ def reconcile(root):
         True if no problems found
         False if errors reported.
     '''
-    # First, build parent, sibling, and child links
+    # First, build parent, child, and sibling links
     for (name, share) in share_name_map.items():
         par_id = share.par_id
         if par_id < 0:
             continue
         parent = share_id_map[par_id]
-        share.sibling = parent.child
-        parent.child = share
         share.parent = parent
         share.par_id = parent.grp_id
-        # Now, build the paths from the share to the root
+        insert_child(parent, share)
+    # Now, build the paths from the share to the root
     for (name, share) in share_name_map.items():
         share.grp_path = create_group_path(share)
     # Fill in special shares: root and unknown
