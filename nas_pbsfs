@@ -146,8 +146,9 @@ class Share:
         self.alloc = UNSPECIFIED    # shares
         self.tree_pct = 0.0         # tree_percentage
         self.grp_pct = 0.0          # shares/group_shares
-        self.usage = 1.0            # usage in fairshare_rec units
+        self.usage = 0.0            # usage in fairshare_rec units
         self.usage_factor = 0.0     # actual usage vs allocation (range 0 - 1)
+        #                             also called fairshare_tree_usage
         self.grp_path = list()      # path from root to node
         self.parent = None          # link up the tree
         self.sibling = None         # chain of nodes with same parent as us
@@ -203,7 +204,8 @@ def main():
     usage_file = os.path.join(sched_priv, 'usage')
     do_debugging()
 
-    default_fields = ['name', 'par_id', 'grp_id', 'alloc', 'usage', 'perc', 'factor']
+    default_fields = ['name', 'par_id', 'grp_id', 'alloc', 'pct',
+                      'usage', 'ftu', 'fsfact']
     conf.verbose = args.verbose
     levels = 0
     if (levels > 1):
@@ -307,9 +309,9 @@ def gen_field_list():
     fl.append(gen_field('grp_id', 'Grp_id', hjr, 'fmt_fs_int', 'grp_id'))
     fl.append(gen_field('alloc', 'Shares', hjr, 'fmt_fs_int', 'alloc'))
     fl.append(gen_field('usage', 'Usage', hjr, 'fmt_fs_usage', 'usage'))
-    fl.append(gen_field('perc', 'Perc', hjr, 'fmt_fs_pct', 'tree_pct'))
-    fl.append(gen_field('factor', 'Factor', hjr, 'fmt_fs_factor', 'fs_factor'))
-    fl.append(gen_field('foo', 'Factor', hjr, 'fmt_fs_factor', 'usage_factor'))
+    fl.append(gen_field('pct', 'Share%', hjr, 'fmt_fs_pct', 'tree_pct'))
+    fl.append(gen_field('ftu', 'FTU', hjr, 'fmt_fs_factor', 'usage_factor'))
+    fl.append(gen_field('fsfact', 'Factor', hjr, 'fmt_fs_factor', 'fs_factor'))
     return fl
 
 
@@ -354,10 +356,27 @@ def do_debugging():
 
 
 def calc_fs_factor(tree):
+    '''Calculate fairshare_factor
+
+    This is the number to use to learn which entities should be favored
+    most when scheduling. Lower is better.
+
+    Args:
+        tree = root of fs tree
+    '''
+    for share in share_id_map.values():
+        if share.tree_pct == 0.0:
+            share.fs_factor = 0.0
+        else:
+            share.fs_factor = pow(2, -(share.usage_factor / share.tree_pct))
+
+
+def calc_fs_tree_usage(tree):
     '''Calculate usage factor for tree
 
-    The factor takes each node's usage and part of its parent's usage
-    into account
+    Each node's usage_factor is calculated. Called fairshare_tree_usage
+    in Admin Guide.  The factor takes each node's usage and part of its
+    parent's usage into account
 
     Args:
         tree = base of tree to work on
@@ -366,12 +385,13 @@ def calc_fs_factor(tree):
         return
     share = tree.child
     while share:
+        print(f'{share.name} {share.usage} / {tree.usage}')
         share.usage_factor = share.usage / tree.usage
-        calc_fs_fact_helper(tree, share.child)
+        calc_fs_tree_usage_helper(tree, share.child)
         share = share.sibling
 
 
-def calc_fs_fact_helper(root, child):
+def calc_fs_tree_usage_helper(root, child):
     '''Helper routine to recurse through tree at root
 
     Args:
@@ -386,13 +406,8 @@ def calc_fs_fact_helper(root, child):
     portion = child.usage / root.usage
     child.usage_factor = portion + \
         (parent.usage_factor - portion) * child.grp_pct
-    if child.tree_pct == 0:
-        child.fs_factor = 0
-    else:
-        print(f'{child.name} {child.usage_factor} {child.tree_pct}')
-        child.fs_factor = pow(2, -(child.usage_factor / child.tree_pct))
-    calc_fs_fact_helper(root, child.sibling)
-    calc_fs_fact_helper(root, child.child)
+    calc_fs_tree_usage_helper(root, child.sibling)
+    calc_fs_tree_usage_helper(root, child.child)
 
 
 def calc_fs_percent(root, alloc):
@@ -436,6 +451,7 @@ def count_alloc(share):
         share = share.sibling
     return tot_alloc
 
+
 def depth_first(tree, depth):
     '''Visit tree in depth first order
 
@@ -457,18 +473,21 @@ def depth_first(tree, depth):
 
 
 def fmt_fs_factor(fi, info):
+    '''Format a factor betwen 0 and 1, given by sources'''
     t = fi['sources'][0]
     val = getattr(info, t)
     return "%0.2f" % val
 
 
 def fmt_fs_int(fi, info):
+    '''Format an integer given by sources'''
     t = fi['sources'][0]
     val = getattr(info, t)
     return str(val)
 
 
 def fmt_fs_name(fi, info):
+    '''Format share name'''
     global args
     val = info.name
     if args.t:
@@ -477,12 +496,14 @@ def fmt_fs_name(fi, info):
 
 
 def fmt_fs_pct(fi, info):
+    '''Format a percentage given by sources'''
     t = fi['sources'][0]
     val = getattr(info, t) * 100.0
     return "%3.2f%%" % val
 
 
 def fmt_fs_usage(fi, info):
+    '''Format a share usage'''
     usage = info.usage
     return "%.2f" % usage
 
@@ -672,8 +693,17 @@ def reconcile(root):
         share.par_id = parent.grp_id
         insert_child(parent, share)
     # Now, build the paths from the share to the root
-    for (name, share) in share_name_map.items():
+    for share in share_id_map.values():
         share.grp_path = create_group_path(share)
+    # Add current use values for leaf nodes into their ancesters
+    for share in share_id_map.values():
+        if share.child:
+            continue    # Not leaf
+        usage = share.usage
+        for name in share.grp_path:
+            node = share_name_map[name]
+            if node is not share:
+                node.usage += usage
     # Fill in special shares: root and unknown
     root = share_name_map[FAIRSHARE_ROOT_NAME]
     root.tree_pct = 1.0
@@ -683,6 +713,7 @@ def reconcile(root):
     unk = share_name_map[UNKNOWN_GROUP_NAME]
     unk.alloc = unknown_alloc
     calc_fs_percent(root.child, UNSPECIFIED)
+    calc_fs_tree_usage(root)
     calc_fs_factor(root)
     return True
 
