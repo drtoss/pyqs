@@ -11,8 +11,8 @@ Unlike pbsfs, it is display only. Use pbsfs to alter fairshare entries.
 # a random environment, check for some conditions that
 # might cause security issues.
 
-
-def check_perms():
+if __name__ == '__main__':
+  def check_perms():
     import sys
     import os
     import stat
@@ -100,6 +100,9 @@ def check_perms():
             if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
                 raise OSError("Unsafe PYTHONPATH with " + path)
     return True
+else:
+  def check_perms():
+    return True
 
 
 if check_perms():
@@ -125,7 +128,7 @@ if check_perms():
     from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
 
 long_desc = __doc__
-debug = ''
+gdebug = ''
 version = "0.1"
 share_name_map = dict()
 share_id_map = dict()
@@ -158,7 +161,7 @@ class Share:
 
 
 def main():
-    global args, version, debug, shost, hostname, pbs_exec, pbs_home
+    global args, version, gdebug, shost, hostname, pbs_exec, pbs_home
     global sched_priv, groups_file, usage_file
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, signal.NSIG):
@@ -189,20 +192,13 @@ def main():
 
     args = conf.args = parser.parse_args()
     conf.verbose = verbose = args.verbose
-    conf.gebug = debug = ' '.join(args.debug)
+    conf.gdebug = gdebug = ' '.join(args.debug)
 
     if (ifl.pbs_loadconf(0) == 0):
         print("Cannot get PBS configuration information", file=sys.stderr)
         return 1
     conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
-    pbs_home = pbs_conf.pbs_home_path
-    pbs_exec = pbs_conf.pbs_exec_path
-    hostname = pbs_conf.pbs_server_name
-    shost = hostname.split('.')[0]
-    sched_priv = os.path.join(pbs_home, 'sched_priv')
-    groups_file = os.path.join(sched_priv, 'resource_group')
-    usage_file = os.path.join(sched_priv, 'usage')
-    do_debugging()
+    set_paths(pbs_conf)
 
     default_fields = ['name', 'par_id', 'grp_id', 'alloc', 'pct',
                       'usage', 'ftu', 'fsfact']
@@ -336,13 +332,13 @@ def do_debugging():
 
     Examine an environment variable for overrides to selected paths.
     '''
-    global debug, mom_priv, pbs_exec, pbs_home
+    global gdebug, mom_priv, pbs_exec, pbs_home
     debugstr = os.getenv('NAS_PBSFS_DEBUG')
     if not debugstr:
         debugstr = ''
-    debugstr = debug + ' ' + debugstr
+    debugstr = gdebug + ' ' + debugstr
     mo = re.search(r'\bdebug\b', debugstr)
-    debug = True if mo else False
+    gdebug = True if mo else False
     # Path overrides:
     for s in re.split(r'[\s,]+', debugstr):
         mo = re.match(r'(\w+)=(.+)', s)
@@ -385,7 +381,6 @@ def calc_fs_tree_usage(tree):
         return
     share = tree.child
     while share:
-        print(f'{share.name} {share.usage} / {tree.usage}')
         share.usage_factor = share.usage / tree.usage
         calc_fs_tree_usage_helper(tree, share.child)
         share = share.sibling
@@ -476,7 +471,7 @@ def fmt_fs_factor(fi, info):
     '''Format a factor betwen 0 and 1, given by sources'''
     t = fi['sources'][0]
     val = getattr(info, t)
-    return "%0.2f" % val
+    return "%0.3g" % val
 
 
 def fmt_fs_int(fi, info):
@@ -505,7 +500,7 @@ def fmt_fs_pct(fi, info):
 def fmt_fs_usage(fi, info):
     '''Format a share usage'''
     usage = info.usage
-    return "%.2f" % usage
+    return "%.3f" % usage
 
 
 def insert_child(parent, child):
@@ -648,7 +643,7 @@ def load_usage(root):
     for entry in struct.iter_unpack(use_fmt, buf[sz:]):
         name = str(entry[0].partition(b'\0')[0], encoding='utf-8')
         if name not in share_name_map:
-            print(f'Usage for unknown share ignored: {name}')
+            print(f'Usage for unknown share ignored: {name}', file=stderr)
             continue
         share_name_map[name].usage = entry[1]
     return
@@ -716,6 +711,19 @@ def reconcile(root):
     calc_fs_tree_usage(root)
     calc_fs_factor(root)
     return True
+
+
+def set_paths(pbs_conf):
+    global pbs_home, pbs_exec, hostname, shost, sched_priv
+    global groups_file, usage_file
+    pbs_home = pbs_conf.pbs_home_path
+    pbs_exec = pbs_conf.pbs_exec_path
+    hostname = pbs_conf.pbs_server_name
+    shost = hostname.split('.')[0]
+    sched_priv = os.path.join(pbs_home, 'sched_priv')
+    groups_file = os.path.join(sched_priv, 'resource_group')
+    usage_file = os.path.join(sched_priv, 'usage')
+    do_debugging()
 
 
 def create_group_path(share):
