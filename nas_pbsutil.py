@@ -280,6 +280,10 @@ def userexit_set_server(gbl, lcl):
     pass
 
 
+def userexit_post_statjob(gbl, lcl):
+    pass
+
+
 def userexit_post_statresv(gbl, lcl):
     pass
 
@@ -315,6 +319,7 @@ userexits_header = 'global %s\n' % ','.join(
         'userexit_interest',
         'userexit_last_chance_a',
         'userexit_set_server',
+        'userexit_post_statjob',
         'userexit_post_statresv'
     ]
 )

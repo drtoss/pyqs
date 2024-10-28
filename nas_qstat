@@ -543,6 +543,8 @@ def display_jobs(args, fmtr):
                 continue
         if gNAS:
             plug_job_info(bs)
+        # Give userexits a chance to tweak info for jobs
+        userexit_post_statjob(globals(), locals())
         if gNAS and check_W_int('shares', 0):
             display_shares(gshare_entity_info)
         # If interested only in jobs on given host, filter the list
