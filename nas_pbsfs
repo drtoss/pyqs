@@ -7,125 +7,17 @@ to pbsfs, but accepts field selections similarly to nas_qstat.
 Unlike pbsfs, it is display only. Use pbsfs to alter fairshare entries.
 '''
 
-# Because this program might be run as root, or with
-# a random environment, check for some conditions that
-# might cause security issues.
+import sys
+import os
+import argparse
+import copy
+import re
+import signal
+import stat
+import struct
+import time
+from sys import stdin, stdout, stderr
 
-if __name__ == '__main__':
-  def check_perms():
-    import sys
-    import os
-    import stat
-    user = os.getuid()
-    # First, clean up python search path by removing
-    # dodgy entries.
-    newp = []
-    for x in sys.path:
-        if x == '':
-            continue
-        try:
-            sb = os.stat(x)
-        except OSError:
-            continue
-        # Skip items not owned by root, unless
-        # running as the owner of the item.
-        if sb.st_uid != 0 and user != sb.st_uid:
-            continue
-        # Skip non-directories in path
-        if not stat.S_ISDIR(sb.st_mode):
-            continue
-        # Skip things that others can modify
-        mode = stat.S_IMODE(sb.st_mode)
-        if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
-            continue
-        if x not in newp:
-            newp.append(x)
-    # Update sys.path to what is left
-    sys.path.clear()
-    sys.path.extend(newp)
-
-    # Now, check that we haven't already loaded
-    # suspect items.
-    for name, val in sys.modules.items():
-        src = str(val)
-        pcs = src.split()
-        pathpart = pcs[-1]
-        path = pathpart[1:-2]
-        if path in ['built-in', 'frozen']:
-            continue
-        if name == '__main__':
-            # For debugging, we might need to
-            # add the directory where the script
-            # resides back to sys.path, if
-            # the -I flag removed it.
-            # First, though, deal with invoked through symlink.
-            t = os.path.dirname(path)
-            sb = os.lstat(path)
-            if stat.S_ISLNK(sb.st_mode):
-                r = os.readlink(path)
-                t = os.path.join(t, r)
-                t = os.path.dirname(t)
-            t = os.path.abspath(t)
-            if t not in sys.path:
-                sys.path.insert(0, t)
-            # If path ends in bin, try to add equivalent lib directory
-            (head, tail) = os.path.split(t)
-            if tail != 'bin':
-                continue
-            t = os.path.join(head, 'lib')
-            if t in sys.path:
-                # Already there
-                continue
-            if not os.path.exists(t):
-                continue
-            # Repeat some security checks
-            try:
-                sb = os.lstat(t)
-            except OSError:
-                continue
-            if not stat.S_ISDIR(sb.st_mode):
-                continue
-            mode = stat.S_IMODE(sb.st_mode)
-            if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
-                continue
-            # Add lib to path
-            sys.path.insert(1, t)
-            continue
-        if "' from '" in src:
-            # Reject things that others can modify
-            sb = os.stat(path)
-            if sb.st_uid != 0 and user != sb.st_uid:
-                raise OSError("Unsafe PYTHONPATH with " + path)
-            mode = stat.S_IMODE(sb.st_mode)
-            if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
-                raise OSError("Unsafe PYTHONPATH with " + path)
-    return True
-else:
-  def check_perms():
-    return True
-
-
-if check_perms():
-    # These imports are indented this way just to avoid gripes from
-    # PEP-8 checkers.
-    import sys
-    import os
-    import argparse
-    import copy
-    import re
-    import signal
-    import socket
-    import stat
-    import struct
-    import time
-    from sys import stdout, stderr
-
-    import nas_xstat_config as conf
-    import pbs_ifl as ifl
-    from nas_pbsutil import *
-    import nas_layout as layout
-    import nas_field_format
-    from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
 
 long_desc = __doc__
 gdebug = ''
@@ -180,6 +72,12 @@ def main():
                         help='output one line per attribute')
     parser.add_argument('-t', default=False, action='store_true',
                         help='display as tree')
+    parser.add_argument('-c', '--convert', default=False, action='store_true',
+                        help='scan job_file to collect usage info')
+    parser.add_argument('--job_file', action='store',
+                        help='output from qstat -f for usage info')
+    parser.add_argument('--new_usage', action='store',
+                        help='where to write usage info')
     parser.add_argument('--verbose', '-v', default=0, action='count',
                         help='increase debugging verbosity')
     parser.add_argument('--version', action='version',
@@ -241,12 +139,21 @@ def main():
     fmtr.field_list = field_list
     nas_field_format.set_field_vars(opts_W)
     # Build resource_group tree
-    root = load_resource_groups()
+    result = load_fs_info(groups_file)
+    if isinstance(result, str):
+        print(result, file=stderr)
+        sys.exit(1)
+    (root, patts, weights) = result
     if root is None:
         sys.exit(1)
     # Insert usage info
-    load_usage(root)
-    reconcile(root)
+    if args.convert:
+        result = load_usage_from_jobs(args.job_file, root, patts, weights)
+    else:
+        load_usage(root)
+    reconcile_usage(root)
+    if args.convert:
+        result = write_new_usage(args.new_usage, root)
     if args.f:
         display_f(args, root, "Group Name", "Group")
     # Display it
@@ -536,92 +443,6 @@ def insert_child(parent, child):
     return
 
 
-def load_resource_groups():
-    '''Read the list of fairshare groups and allocations
-
-    Note an odd use of numeric id's. In the resource_group file, the
-    numeric id (second column) is called the group of any children of
-    the current group. More logical would be to call it the id of the
-    group. The use is the same.
-
-    Returns:
-        A tree of the groups, linkage is by group id
-    '''
-
-    # Construct tree root
-
-    root = new_group(FAIRSHARE_ROOT_NAME, -1, 0)
-    share_name_map['root'] = root
-    # Now read the remaining groups from the resource_group file
-    err_cnt = 0
-    with open(groups_file, 'r') as fd:
-        line_no = 0
-        for line in fd.readlines():
-            line_no += 1
-            if err_cnt > 10:
-                print(f'Excessive errors, giving up at line {line_no}',
-                      file=stderr)
-                return None
-            # Discard comments
-            line = line.partition('#')[0]
-            if line == '' or line.isspace():
-                continue
-            # Split into four fields
-            flds = line.split()
-            if len(flds) != 4:
-                print(f'Wrong format at line {line_no}', file=stderr)
-                err_cnt += 1
-                continue
-            (name, grp_id, parent, alloc) = flds
-            # Do sanity checks on fields
-            if not name.isidentifier():
-                print(f'Bad group name {name} at line {line_no}', file=stderr)
-                err_cnt += 1
-                continue
-            e_cnt = err_cnt
-            try:
-                grp_id = int(grp_id)
-            except Exception:
-                print(f'Non-integer grp_id {grp_id} as line {line_no}',
-                      file=stderr)
-                err_cnt += 1
-            if not parent.isidentifier():
-                print(f'Bad parent name {parent} at line {line_no}',
-                      file=stderr)
-                err_cnt += 1
-            try:
-                alloc = int(alloc)
-            except Exception:
-                print(f'Non-integer grp_id {grp_id} as line {line_no}',
-                      file=stderr)
-                err_cnt += 1
-            if e_cnt != err_cnt:
-                continue
-            # Now do semantic checks
-            if name in share_name_map:
-                print(f'Duplicate share name {name}', file=stderr)
-                err_cnt += 1
-                continue
-            if grp_id in share_id_map:
-                print(f'Group id already in use: {grp_id}', file=stderr)
-                err_cnt += 1
-                continue
-            if parent not in share_name_map:
-                print(f'Unknown parent share {parent} at {line_no}',
-                      file=stderr)
-                err_cnt += 1
-                continue
-            par_id = share_name_map[parent].grp_id
-            share = new_group(name, par_id, grp_id)
-            share.alloc = alloc
-        if err_cnt:
-            return None
-    # Add the unknown group at end
-    unknown = new_group(UNKNOWN_GROUP_NAME, 0, 1)
-    unknown.alloc = unknown_alloc
-    return root
-
-
 def load_usage(root):
     '''Read group use data from file
 
@@ -649,6 +470,44 @@ def load_usage(root):
     return
 
 
+def load_usage_from_jobs(fname, tree, patts, weights):
+    if fname == '-':
+        fs = stdin
+    else:
+        fs = open(fname)
+    lines = fd.read()
+    if fname != '-':
+        fs.close()
+    interesting = ['egroup', 'euser', 'resources_used', 'schedselect',
+                   'Account_Name']
+    jobs = lines_to_stat(lines, None)
+    del lines
+    for job in jobs:
+        entity = set_account_name(job)
+        if entity not in share_name_map:
+            continue
+        sbu_rate = set_sbu_rate(job)
+        if sbu_rate is None:
+            continue
+        effective_wt = calc_aged_walltime(job)
+        eff_sbus = sbu_rate * effective_wt
+        share = share_name_map[entity]
+        share.usage += eff_sbus
+    return True
+
+
+def set_account_name(job):
+    entity = job.get('Account_Name')
+    if entity:
+        return entity:
+    egroup = job['egroup']
+    euser = job['euser']
+    share = get_share(egroup, euser)
+    entity = share.name
+    job['Account_Name'] = entity
+    return entity
+
+
 def new_group(name, par_id, grp_id):
     '''Create a new share object
 
@@ -669,7 +528,7 @@ def new_group(name, par_id, grp_id):
     return share
 
 
-def reconcile(root):
+def reconcile_tree(root):
     '''Fill in a bare share tree
 
     Args:
@@ -690,15 +549,6 @@ def reconcile(root):
     # Now, build the paths from the share to the root
     for share in share_id_map.values():
         share.grp_path = create_group_path(share)
-    # Add current use values for leaf nodes into their ancesters
-    for share in share_id_map.values():
-        if share.child:
-            continue    # Not leaf
-        usage = share.usage
-        for name in share.grp_path:
-            node = share_name_map[name]
-            if node is not share:
-                node.usage += usage
     # Fill in special shares: root and unknown
     root = share_name_map[FAIRSHARE_ROOT_NAME]
     root.tree_pct = 1.0
@@ -708,6 +558,19 @@ def reconcile(root):
     unk = share_name_map[UNKNOWN_GROUP_NAME]
     unk.alloc = unknown_alloc
     calc_fs_percent(root.child, UNSPECIFIED)
+    return True
+
+
+def reconcile_usage(root):
+    # Add current use values for leaf nodes into their ancesters
+    for share in share_id_map.values():
+        if share.child:
+            continue    # Not leaf
+        usage = share.usage
+        for name in share.grp_path:
+            node = share_name_map[name]
+            if node is not share:
+                node.usage += usage
     calc_fs_tree_usage(root)
     calc_fs_factor(root)
     return True
@@ -734,7 +597,218 @@ def create_group_path(share):
     return path
 
 
-if __name__ == '__main__':
-    sys.exit(main())
+def load_fs_info(fname):
+    '''Read and parse fairshare info file
 
+    Args:
+        fname = path to file to load from
+    Returns:
+        Tuple (tree, pattern, weights) where
+            tree is tree of entity Shares
+            patterns is list of tuples (pattern, share) where:
+                pattern is a compiled pattern
+                share is the Share for the matching entity
+            weights is dict with key model_name value (cpus, sbus)
+        err string on error
+    '''
+    try:
+        with open(fname) as fs:
+            buf = fs.read()
+    except OSError:
+        return f'Cannot read {fname}'
+    (nlines, plines, wlines) = split_share_info(fname, buf)
+    # We need the share tree to validate the patterns, so process it first
+    tree = build_tree(fname, nlines)
+    if isinstance(tree, str):
+        return tree
+    patt_list = build_patterns(fname, plines, share_name_map)
+    if isinstance(patt_list, str):
+        return patt_list
+    weight_dict = build_weights(fname, wlines)
+    if isinstance(weight_dict, str):
+        return weight_dict
+    return (tree, patt_list, weight_dict)
+
+
+def build_tree(fname, lines):
+    '''Build tree(fname, lines)
+
+    Build tree of Shares from lines
+    Lines have the form
+        (entity_name grp_id parent_name allocation)
+    '''
+    root = new_group(FAIRSHARE_ROOT_NAME, -1, 0)
+    share_name_map['root'] = root
+    for (lineno, flds) in lines:
+        loc = f'at {fname}:{lineno}'
+        if len(flds) != 4:
+            return f'Wrong format {loc}'
+        (name, grp_id, parent, alloc) = flds
+        if not name.isidentifier():
+            return f'Bad group name {name} {loc}'
+        try:
+            grp_id = int(grp_id)
+        except Exception:
+            return f'Non_integer grp_id {grp_id} {loc}'
+        if not parent.isidentifier():
+            return f'Bad parent name {parent} {loc}'
+        try:
+            alloc = int(alloc)
+        except Exception:
+            return f'Non-integer allocation {alloc} {loc}'
+        # Semantic checks
+        if name in share_name_map:
+            return f'Duplicate share name {name} {loc}'
+        if grp_id in share_id_map:
+            return f'Group id already in use: {grp_id} {loc}'
+        if parent not in share_name_map:
+            return f'Unknown parent share {parent} {loc}'
+        par_id = share_name_map[parent].grp_id
+        share = new_group(name, par_id, grp_id)
+        share.alloc = alloc
+    # Add the unknown group at end
+    unknown = new_group(UNKNOWN_GROUP_NAME, 0, 1)
+    unknown.alloc = unknown_alloc
+    result = reconcile_tree(root)
+    return root
+
+
+def build_patterns(fname, plines, entities):
+    '''Create list of entity patterns
+
+    Args:
+        fname = name of file the patterns came from
+        plines = split-out pattern lines
+        entities = dict with known entities as keys
+    Returns:
+        list of (compiled pattern, entity name) tuples in same order
+        as in the file.
+        returns string message on error
+    '''
+    plist = list()
+    for (lineno, flds) in plines:
+        loc = f'at {fname}:{lineno}'
+        if len(flds) != 2:
+            return f'Invalid pattern line {loc}'
+        (patt, entity) = flds
+        if entity not in entities:
+            return 'Unknown entity name {entity} {loc}'
+        try:
+            t = re.compile(patt + '$')
+        except Exception:
+            return f'Invalid pattern {patt} {loc}'
+        plist.append((t, entity))
+    return plist
+
+
+def build_weights(fname, wlines):
+    '''Create dict of model types and weights
+
+    Args:
+        fname = name of file the weights came from
+        wlines = split-out model weight lines
+    Returns:
+        dict with model name as key and (CPUs, SBUs) tuple as value
+        returns string message on error
+    '''
+    weights = dict()
+    for (lineno, flds) in wlines:
+        loc = f'at {fname}:{lineno}'
+        if len(flds) != 3:
+            return f'Invalid model line {loc}'
+        (name, cpus, sbus) = flds
+        if name in weights:
+            return f'Duplicate model {name} {loc}'
+        try:
+            cpus = int(cpus)
+        except Exception:
+            return f'Invalid #CPUs {cpus} {loc}'
+        try:
+            sbus = float(sbus)
+        except Exception:
+            return f'Invalid SBU rating {sbus} {loc}'
+        weights[name] = (cpus, sbus)
+    return weights
+
+
+def split_share_info(fname, buf):
+    '''Split the text of a shares file into its pieces.
+
+    Examine each line to decide which type it is.
+    Remove comments.
+
+    Args:
+        fname = name of source file (for error messages)
+        buf = contents of file
+    Returns:
+        tuple of lists (nodes, patterns, weights)
+            where each is a list of tuples (lineno, line)
+    '''
+    nodes = list()
+    patterns = list()
+    weights = list()
+    lineno = 0
+    for line in buf.splitlines():
+        lineno += 1
+        # Truncate line at comments
+        if line.startswith('#map') or line.startswith('#model'):
+            line = '#' + line[1:].partition('#')[0]
+        else:
+            line = line.partition('#')[0]
+        line = line.strip()
+        flds = line.split()
+        # skip empty or comment lines
+        if line == '':
+            continue
+        if flds[0] == '#map':
+            patterns.append((lineno, flds[1:]))
+            continue
+        if flds[0] == '#model':
+            weights.append((lineno, flds[1:]))
+            continue
+        nodes.append((lineno, flds))
+    return (nodes, patterns, weights)
+
+
+if __name__ == '__main__':
+    for name, val in sys.modules.items():
+        src = str(val)
+        pcs = src.split()
+        pathpart = pcs[-1]
+        path = pathpart[1:-2]
+        if path in ['built-in', 'frozen']:
+            continue
+        if name == '__main__':
+            # For debugging, we might need to
+            # add the directory where the script
+            # resides back to sys.path, if
+            # the -I flag removed it.
+            # First, though, deal with invoked through symlink.
+            t = os.path.dirname(path)
+            sb = os.lstat(path)
+            if stat.S_ISLNK(sb.st_mode):
+                r = os.readlink(path)
+                t = os.path.join(t, r)
+                t = os.path.dirname(t)
+            t = os.path.abspath(t)
+            if t not in sys.path:
+                sys.path.insert(0, t)
+            # If path ends in bin, try to add equivalent lib directory
+            (head, tail) = os.path.split(t)
+            if tail != 'bin':
+                continue
+            t = os.path.join(head, 'lib')
+            if t in sys.path:
+                # Already there
+                continue
+            if not os.path.exists(t):
+                continue
+    import nas_xstat_config as conf
+    import pbs_ifl as ifl
+    from nas_pbsutil import *
+    import nas_layout as layout
+    import nas_field_format
+    from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
+
+    sys.exit(main())
 # vi:ts=4:sw=4:expandtab
