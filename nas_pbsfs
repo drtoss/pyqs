@@ -11,6 +11,7 @@ import sys
 import os
 import argparse
 import copy
+import math
 import re
 import signal
 import stat
@@ -24,8 +25,13 @@ gdebug = ''
 version = "0.1"
 share_name_map = dict()
 share_id_map = dict()
+map_cache = dict()
 
 unknown_alloc = 10  # XXX should load from sched_conf
+fs_decay_time = 24 * 3600.0
+fs_decay_factor = 0.5
+gnow = time.time()
+asof_time = gnow
 # Constants
 FAIRSHARE_ROOT_NAME = 'TREEROOT'
 UNKNOWN_GROUP_NAME = 'unknown'
@@ -151,7 +157,9 @@ def main():
         result = load_usage_from_jobs(args.job_file, root, patts, weights)
     else:
         load_usage(root)
+    display_standard(root, fmtr)
     reconcile_usage(root)
+    display_standard(root, fmtr)
     if args.convert:
         result = write_new_usage(args.new_usage, root)
     if args.f:
@@ -288,7 +296,8 @@ def calc_fs_tree_usage(tree):
         return
     share = tree.child
     while share:
-        share.usage_factor = share.usage / tree.usage
+        usage = 0.0 if tree.usage == 0.0 else tree.usage
+        share.usage_factor = share.usage / usage
         calc_fs_tree_usage_helper(tree, share.child)
         share = share.sibling
 
@@ -449,6 +458,7 @@ def load_usage(root):
     Args:
         root = root of shares tree
     '''
+    global asof_time
     with open(usage_file, 'rb') as fd:
         buf = fd.read()
     hdr_fmt = '9sdl'
@@ -460,6 +470,7 @@ def load_usage(root):
     if magic != MAGIC_NAME or header[1] != 2.0:
         print(f"Bad usage file header: {usage_file}", file=stderr)
         sys.exit(1)
+    asof_time = header[2]
     use_fmt = '50sd'
     for entry in struct.iter_unpack(use_fmt, buf[sz:]):
         name = str(entry[0].partition(b'\0')[0], encoding='utf-8')
@@ -471,23 +482,30 @@ def load_usage(root):
 
 
 def load_usage_from_jobs(fname, tree, patts, weights):
+    global asof_time
     if fname == '-':
         fs = stdin
     else:
         fs = open(fname)
-    lines = fd.read()
+        stat_buf = os.stat(fname)
+        asof_time = stat_buf.st_mtime
+    lines = fs.read()
     if fname != '-':
         fs.close()
     interesting = ['egroup', 'euser', 'resources_used', 'schedselect',
-                   'Account_Name']
-    jobs = lines_to_stat(lines, None)
+                   'Account_Name', 'job_state', 'obittime', 'stime']
+    jobs = lines_to_stat(lines, interesting)
     del lines
     for job in jobs:
-        entity = set_account_name(job)
+        jobname = job['id']
+        entity = set_account_name(job, patts)
         if entity not in share_name_map:
+            print(f'Unknown entity for job {jobname}', file=stderr)
             continue
-        sbu_rate = set_sbu_rate(job)
-        if sbu_rate is None:
+        sbu_rate = set_sbu_rate(job, weights)
+        if isinstance(sbu_rate, str):
+            print(f'Cannot compute SBU rate for job {jobname} {sbu_rate}',
+                  file=stderr)
             continue
         effective_wt = calc_aged_walltime(job)
         eff_sbus = sbu_rate * effective_wt
@@ -496,16 +514,141 @@ def load_usage_from_jobs(fname, tree, patts, weights):
     return True
 
 
-def set_account_name(job):
+def calc_aged_walltime(job):
+    '''Calculate walltime after decay
+
+    Args:
+        info = info for job
+    Returns:
+        aged walltime
+
+    The basic formula for the walltime multiplier is:
+
+        mult = (1 - r^(n)) / (1 - r)
+
+        where r is the decay rate (fairshare_decay_factor) and n
+        is the number of fairshare_decay_time intervals that have
+        elapsed during walltime.
+        This gets further shrunk by the number of intervals that
+        have elapsed between when the walltime was sampled and now.
+    '''
+    global asof_time
+    global fs_decay_time, fs_decay_factor
+    state = job.get('job_state')
+    # Skip jobs still in queue
+    if state in 'HQTW':
+        return 0.0
+    walltime = job.get('resources_used.walltime')
+    if walltime is None:
+        return 0.0
+    walltime = nas_field_format.clocktosecs(walltime)
+    asof = asof_time
+    # Jobs no longer running:
+    if state in 'FMX':
+        asof = job.get('obittime')
+        if asof is None:
+            # Guess at job end time
+            stime = job.get('stime')
+            if stime is None:
+                return 0.0
+            asof = stime + walltime
+        else:
+            asof = nas_field_format.clocktosecs(asof)
+    (f, n) = math.modf(walltime / fs_decay_time)
+    fact = (1.0 - math.pow(fs_decay_factor, n)) / (1.0 - fs_decay_factor)
+    # Fact is factor as of last walltime update. Do further decaying if
+    # that was in the past
+    result = fs_decay_time * (f + fact)
+    if asof < gnow:
+        fact2 = math.pow(fs_decay_factor, (gnow - asof) / fs_decay_time)
+        result *= fact2
+    return result
+
+
+def set_account_name(job, patts):
     entity = job.get('Account_Name')
+    print(f'Job {job["id"]} for {entity}')
     if entity:
-        return entity:
+        return entity
     egroup = job['egroup']
     euser = job['euser']
-    share = get_share(egroup, euser)
-    entity = share.name
+    entity = get_share_name(egroup, euser, patts)
     job['Account_Name'] = entity
     return entity
+
+
+def get_share_name(egroup, euser, patts):
+    global map_cache
+    # Check if mapping is in cache
+    key = egroup + ':' + euser
+    entity = map_cache.get(key)
+    if entity:
+        return entity
+    # Scan list of patterns for first match
+    for (rcomp, entity) in patts:
+        if not rcomp.match(key):
+            continue
+        map_cache[key] = entity
+        return entity
+    return None
+
+
+def set_sbu_rate(job, weights):
+    '''Get and set job SBU rate
+
+    Args:
+        job = info for job
+        weights = dict mapping model to (cpus, sbus) tuple
+    Returns:
+        computed sbu rate
+    '''
+    rate = job.get('sbu_rate')
+    if rate:
+        return rate
+    select = job.get('schedselect')
+    if not select:
+        select = job.get('Resource_List.select')
+    if not select:
+        return 0.0
+    if 'model' not in select:
+        select += ':model=rom'
+    rate = calc_sbus(select, weights)
+    job['sbu_rate'] = rate
+    return rate
+
+
+def calc_sbus(select, weights):
+    '''Calculate SBU rate from select statement
+
+    Args:
+        select = select statement from job
+        weights = dict mapping model to (cpus, sbus) tuple
+    Returns:
+        computed sbu rate as float
+        string message on error
+    '''
+    rate = 0.0
+    # Compute rate for each chunk in select
+    # Format is count:...model=xyz...
+    for chunk in select.split('+'):
+        idx = chunk.index(':')
+        if idx < 0:
+            return f'Unexpected select attribute {select}'
+        count = chunk[:idx]
+        try:
+            count = int(count)
+        except Exception:
+            return f'Bad count in select {count}'
+        mo = re.search(r'\bmodel=(\w+)\b', chunk)
+        if not mo:
+            return f'Model type missing from select chunk {chunk}'
+        model = mo.group(1)
+        weight = weights.get(model)
+        if weight is None:
+            return f'Unknown model type {model}'
+        # TODO We should deal with shared nodes here, but not yet
+        rate += count * weight[1]
+    return rate
 
 
 def new_group(name, par_id, grp_id):
