@@ -1,4 +1,4 @@
-#!/usr/bin/python3 -I
+#!/usr/bin/python3
 
 '''Display information about Altair fairshares
 
@@ -157,11 +157,9 @@ def main():
         result = load_usage_from_jobs(args.job_file, root, patts, weights)
     else:
         load_usage(root)
-    display_standard(root, fmtr)
     reconcile_usage(root)
-    display_standard(root, fmtr)
     if args.convert:
-        result = write_new_usage(args.new_usage, root)
+        result = write_new_usage(args.new_usage, share_id_map.values())
     if args.f:
         display_f(args, root, "Group Name", "Group")
     # Display it
@@ -508,7 +506,8 @@ def load_usage_from_jobs(fname, tree, patts, weights):
                   file=stderr)
             continue
         effective_wt = calc_aged_walltime(job)
-        eff_sbus = sbu_rate * effective_wt
+        # SBU rates are per hour of walltime
+        eff_sbus = sbu_rate * effective_wt / 3600.0
         share = share_name_map[entity]
         share.usage += eff_sbus
     return True
@@ -567,12 +566,12 @@ def calc_aged_walltime(job):
 
 def set_account_name(job, patts):
     entity = job.get('Account_Name')
-    print(f'Job {job["id"]} for {entity}')
     if entity:
         return entity
     egroup = job['egroup']
     euser = job['euser']
     entity = get_share_name(egroup, euser, patts)
+    print(f'Job {job["id"]} for {entity}')
     job['Account_Name'] = entity
     return entity
 
@@ -611,8 +610,10 @@ def set_sbu_rate(job, weights):
     if not select:
         return 0.0
     if 'model' not in select:
-        select += ':model=rom'
+        select += ':model=bro'
     rate = calc_sbus(select, weights)
+    if isinstance(rate, str):
+        return rate
     job['sbu_rate'] = rate
     return rate
 
@@ -913,39 +914,31 @@ def split_share_info(fname, buf):
     return (nodes, patterns, weights)
 
 
-if __name__ == '__main__':
-    for name, val in sys.modules.items():
-        src = str(val)
-        pcs = src.split()
-        pathpart = pcs[-1]
-        path = pathpart[1:-2]
-        if path in ['built-in', 'frozen']:
+def write_new_usage(fname, shares):
+    '''Write out current usage information in Altair binary format
+
+    Args:
+        fname = file to write to
+        shares = current shares info
+    '''
+    # Write out header
+    global gnow
+    buf = bytearray()
+    hdr_fmt = '9sdl'
+    t = struct.pack(hdr_fmt, bytes(MAGIC_NAME, 'utf-8'), 2.0, int(gnow))
+    buf += t
+    use_fmt = '50sd'
+    for share in shares:
+        if share.usage <= 0.0:
             continue
-        if name == '__main__':
-            # For debugging, we might need to
-            # add the directory where the script
-            # resides back to sys.path, if
-            # the -I flag removed it.
-            # First, though, deal with invoked through symlink.
-            t = os.path.dirname(path)
-            sb = os.lstat(path)
-            if stat.S_ISLNK(sb.st_mode):
-                r = os.readlink(path)
-                t = os.path.join(t, r)
-                t = os.path.dirname(t)
-            t = os.path.abspath(t)
-            if t not in sys.path:
-                sys.path.insert(0, t)
-            # If path ends in bin, try to add equivalent lib directory
-            (head, tail) = os.path.split(t)
-            if tail != 'bin':
-                continue
-            t = os.path.join(head, 'lib')
-            if t in sys.path:
-                # Already there
-                continue
-            if not os.path.exists(t):
-                continue
+        t = struct.pack(use_fmt, bytes(share.name, 'utf-8'), share.usage)
+        buf += t
+    with open(fname, mode='wb') as fs:
+        fs.write(buf)
+    return
+
+
+if __name__ == '__main__':
     import nas_xstat_config as conf
     import pbs_ifl as ifl
     from nas_pbsutil import *
