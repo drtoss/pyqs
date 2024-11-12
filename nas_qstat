@@ -613,7 +613,7 @@ def display_jobs(args, fmtr):
     if args.f:
         t = "Job" if conf.gNAS else "Job Id"
         return display_f(args, info, t, "Jobs")
-    # Tag sort job list
+    # Tag sort job list, unless -W do_sort=false
 
     def cmpf(i):
         def safeint(x):
@@ -651,7 +651,10 @@ def display_jobs(args, fmtr):
         k3 = safeint(s)
         k4 = safeint(a.strip('[]') if a else '0')
         return (k1, k2, k3, k4, i)
-    tags = sorted(range(len(info)), key=cmpf)
+    if check_W_bool('do_sort', True):
+        tags = sorted(range(len(info)), key=cmpf)
+    else:
+        tags = range(len(info))
     # Display info
     rows = []
     for jobi in tags:
