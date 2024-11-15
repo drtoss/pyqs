@@ -2,7 +2,9 @@
 
 import sys
 import os
+import grp
 import math
+import pwd
 import re
 import stat
 import struct
@@ -28,6 +30,7 @@ shost = 'localhost'
 
 gnow = time.time()
 asof_time = gnow
+for_manager = False                 # True if running for a manager
 
 # Constants
 FAIRSHARE_ROOT_NAME = 'TREEROOT'
@@ -63,18 +66,27 @@ def set_fs_info(hn, **kwds):
         df = fs_decay_factor (float)
         dt = fs_decay_time (seconds)
         gf = groups_file (resource_groups) path
+        rs = reset global maps
         ua = unknown_alloc (float)
         uf = usage_file path
     '''
     global shost, fs_decay_factor, fs_decay_time, groups_file, unknown_alloc
-    global usage_file
+    global usage_file, for_manager, gnow, asof_time
     shost = hn.split('.')[0]
     for (key, value) in kwds.items():
         if key == 'df': fs_decay_factor = value
         if key == 'dt': fs_decay_time = value
+        if key == 'fm': for_manager = value
         if key == 'gf': groups_file = value
         if key == 'ua': unknown_alloc = value
         if key == 'uf': usage_file = value
+        if key == 'rs':
+            share_name_map.clear()
+            share_id_map.clear()
+            map_cache.clear()
+            for_manager = False
+            gnow = time.time()
+            asof_time = gnow
     do_debugging()
     return
 
@@ -337,12 +349,37 @@ def calc_aged_walltime(job):
     return result
 
 
-def set_account_name(job, patts):
+def set_account_name(job, patts, requestor=None):
+    '''Set job's Account_Name
+
+    We're assuming the Account_Name will be used by fairshare as the
+    entity to associate with job usage (fairshare_entity).
+
+    If the event requestor is a manager, we use whatever entity they
+    specified.
+
+    Args:
+        job = job info
+        patts = patterns mapping group:user to entity
+        requestor = user requesting action (for qsub)
+    Returns:
+        selected entity, also put in job's Account_Name attribute
+        None if lookup failed
+    '''
     entity = job.get('Account_Name')
-    if entity:
+    if entity and for_manager:
         return entity
-    egroup = job['egroup']
     euser = job['euser']
+    if euser == None:
+        euser = requestor.split('@')[0]
+    egroup = job['egroup']
+    if egroup == None:
+        try:
+            pwinfo = pwd.getpwnam(euser)
+            grinfo = grp.getgrgid(pwinfo[3])
+            egroup = grinfo[0]
+        except KeyError:
+            return None
     entity = get_share_name(egroup, euser, patts)
     job['Account_Name'] = entity
     return entity
@@ -364,8 +401,8 @@ def get_share_name(egroup, euser, patts):
     return None
 
 
-def set_sbu_rate(job, weights):
-    '''Get and set job SBU rate
+def set_sbu_rate_nh(job, weights):
+    '''Get and set job SBU rate when not in hook context
 
     Args:
         job = info for job
@@ -374,7 +411,7 @@ def set_sbu_rate(job, weights):
         computed sbu rate
     '''
     rate = job.get('Resource_List.sbu_rate')
-    if rate:
+    if rate and for_manager:
         return rate
     select = job.get('schedselect')
     if not select:
@@ -389,6 +426,37 @@ def set_sbu_rate(job, weights):
     job['Resource_List.sbu_rate'] = rate
     return rate
 
+
+def set_sbu_rate_hook(job, weights):
+    '''Set job SBU rate when running in hook context
+
+    Args:
+        job = info for job
+        weights = dict mapping model to (cpus, sbus) tuple
+    Returns:
+        computed sbu rate
+    '''
+    hjob = job.job
+    R = hjob.Resource_List
+    try:
+        rate = R['sbu_rate']
+    except Exception:
+        rate = None
+    if rate and for_manager:
+        return rate
+    select = job['schedselect']
+    if not select:
+        select = R['select']
+    if not select:
+        return 0.0
+    select = str(select)
+    if 'model' not in select:
+        return 'Model must be specified in select attribute'
+    rate = calc_sbus(select, weights)
+    if isinstance(rate, str):
+        return rate
+    R['sbu_rate'] = rate
+    return rate
 
 def calc_sbus(select, weights):
     '''Calculate SBU rate from select statement
