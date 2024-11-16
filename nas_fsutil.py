@@ -19,18 +19,18 @@ share_id_map = dict()
 map_cache = dict()
 
 # XXX The following should be loaded from running system
-# Set set_fs_info() for how to change at runtime
+# See set_fs_info() for how to change at runtime
 fs_decay_time = 24 * 3600.0
 fs_decay_factor = 0.5
 unknown_alloc = 10
-sched_priv = '/opt/pbs/sched_priv'
+sched_priv = '/var/spool/pbs/sched_priv'
 groups_file = os.path.join(sched_priv, 'resource_group')
 usage_file = os.path.join(sched_priv, 'usage')
 shost = 'localhost'
 
 gnow = time.time()
 asof_time = gnow
-for_manager = False                 # True if running for a manager
+trust_job_info = False                 # True if running for a manager
 
 # Constants
 FAIRSHARE_ROOT_NAME = 'TREEROOT'
@@ -71,20 +71,21 @@ def set_fs_info(hn, **kwds):
         uf = usage_file path
     '''
     global shost, fs_decay_factor, fs_decay_time, groups_file, unknown_alloc
-    global usage_file, for_manager, gnow, asof_time
-    shost = hn.split('.')[0]
+    global usage_file, trust_job_info, gnow, asof_time
+    if hn:
+        shost = hn.split('.')[0]
     for (key, value) in kwds.items():
         if key == 'df': fs_decay_factor = value
         if key == 'dt': fs_decay_time = value
-        if key == 'fm': for_manager = value
         if key == 'gf': groups_file = value
+        if key == 'tj': trust_job_info = value
         if key == 'ua': unknown_alloc = value
         if key == 'uf': usage_file = value
         if key == 'rs':
             share_name_map.clear()
             share_id_map.clear()
             map_cache.clear()
-            for_manager = False
+            trust_job_info = False
             gnow = time.time()
             asof_time = gnow
     do_debugging()
@@ -367,12 +368,16 @@ def set_account_name(job, patts, requestor=None):
         None if lookup failed
     '''
     entity = job.get('Account_Name')
-    if entity and for_manager:
+    if entity and trust_job_info:
         return entity
     euser = job['euser']
     if euser == None:
         euser = requestor.split('@')[0]
     egroup = job['egroup']
+    if egroup == None:
+        gl = job.get('group_list')
+        if gl:
+            egroup = str(gl).split(',')[0].split('@')[0]
     if egroup == None:
         try:
             pwinfo = pwd.getpwnam(euser)
@@ -381,7 +386,8 @@ def set_account_name(job, patts, requestor=None):
         except KeyError:
             return None
     entity = get_share_name(egroup, euser, patts)
-    job['Account_Name'] = entity
+    if entity:
+        job['Account_Name'] = entity
     return entity
 
 
@@ -411,8 +417,8 @@ def set_sbu_rate_nh(job, weights):
         computed sbu rate
     '''
     rate = job.get('Resource_List.sbu_rate')
-    if rate and for_manager:
-        return rate
+    if rate and trust_job_info:
+        return float(rate)
     select = job.get('schedselect')
     if not select:
         select = job.get('Resource_List.select')
@@ -442,7 +448,7 @@ def set_sbu_rate_hook(job, weights):
         rate = R['sbu_rate']
     except Exception:
         rate = None
-    if rate and for_manager:
+    if rate and trust_job_info:
         return rate
     select = job['schedselect']
     if not select:
