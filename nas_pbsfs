@@ -51,16 +51,18 @@ def main():
                         help='Debugging arguments (for developers)')
     parser.add_argument('-f', default=False, action='store_true',
                         help='output one line per attribute')
+    parser.add_argument('-g', default=False, action='store_true',
+                        help='display details for share group(s)')
     parser.add_argument('-t', default=False, action='store_true',
                         help='display as tree')
     parser.add_argument('-c', '--convert', default=False, action='store_true',
                         help='scan job_file to collect usage info')
+    parser.add_argument('--groups', action='store',
+                        help="path to scheduler's list of resource groups")
     parser.add_argument('--job_file', action='store',
                         help='output from nas_qstat -xf for -c usage info')
     parser.add_argument('--new_usage', action='store', default='new_usage',
                         help='where to write -c usage info')
-    parser.add_argument('--groups', action='store',
-                        help="path to scheduler's list of resource groups")
     parser.add_argument('--usage', action='store',
                         help='path to input usage file')
     parser.add_argument('--verbose', '-v', default=0, action='count',
@@ -149,6 +151,10 @@ def main():
         result = write_new_usage(args.new_usage, share_id_map.values())
     if args.f:
         display_f(args, root, "Group Name", "Group")
+        return 0
+    if args.g:
+        display_g(args, root)
+        return 0
     # Display it
     display_standard(root, fmtr)
     return 0
@@ -156,6 +162,34 @@ def main():
 
 def display_f(args, root, item_tag, json_tag):
     return 0
+
+
+def display_g(args, root):
+    spc = ''
+    for sname in args.shares:
+        share = fsu.share_name_map.get(sname)
+        if share is None:
+            print(f'Unknown share group {sname} ignored', file=stderr)
+            continue
+        fmt = '%-23s :'
+        print(f'{spc}fairshare entity: {sname}')
+        print(fmt % 'Resgroup', share.par_id)
+        print(fmt % 'cresgroup', share.grp_id)
+        print(fmt % 'Shares', share.alloc)
+        print(fmt % 'Percentage', '%f%%' % (share.tree_pct * 100))
+        print(fmt % 'fairshare_tree_usage', '%f' % share.usage_factor)
+        print(fmt % 'usage', '%.0f' % share.usage)
+        tp = -1.0 if share.tree_pct == 0 else share.usage / share.tree_pct
+        print(fmt % 'usage/perc', '%.0f' % tp)
+        print('Path from root:')
+        fmtb = '%-10s: %5d %10.0f / %5.3f = %.0f'
+        for gpname in share.grp_path:
+            gp = fsu.share_name_map.get(gpname)
+            if gp is None:
+                continue
+            t = -1.0 if gp.tree_pct == 0.0 else gp.usage / gp.tree_pct
+            print(fmtb % (gp.name, gp.grp_id, gp.usage, gp.tree_pct, t))
+        spc = '\n'
 
 
 def display_standard(root, fmtr):
@@ -173,7 +207,7 @@ def display_standard(root, fmtr):
             title = fld['name']
         c.add_field(title, ident=fld['name'], **fld['format'])
     rows = list()
-    for share in depth_first(root, 0) if args.t else share_id_map.values():
+    for share in fsu.depth_first(root, 0) if args.t else share_id_map.values():
         row = list()
         for f in fmtr.field_list:
             func = globals().get(f['func'], None)
