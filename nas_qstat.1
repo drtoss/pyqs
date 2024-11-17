@@ -295,6 +295,14 @@ the vnode appears by itself.
 Instead of a host list, the values "True" or "False" (or "t"/"f") can be
 used to enable/disable condensing for all servers.
 .TP
+.BI do_sort= True
+Normally,
+.B nas_qstat
+displays queued jobs sorted in the same order as the scheduler does.
+Set this to false to have
+.B nas_qstat
+display jobs in native order.
+.TP
 .BI host[s]= host_pattern
 Restrict reporting of jobs to those running on nodes whose names match the
 regular expression given by
@@ -589,73 +597,29 @@ JobID      User     Queue Jobname TSK Nds wallt S  wallt Eff
 8.server2  dtalcott playq STDIN     1   1 00:03 H  00:00  --
 .EE
 .SH EXAMPLE USEREXITS
-This first example shows a
-.I qstat_userexits
-file that a site might install in
-.I PBS_EXEC/lib/site
-to enable NAS options,
-and make
-.B node_detail
-and
-.B model
+The following is a simple example showing how to change the default list
+of job fields. It does this by supplying a
+.B "-W o=..."
+option. The second
 .B -W
-options default.
-.sp
+option limits the width of the jobname field to 20 characters.
 .EX
-# Enable NAS-specific features
-globals()['gNAS'] = True
-
-# Possibly do different things based on whether we are statusing servers,
-# queues, or jobs
-if args.B:
-    pass
-elif args.Q:
-    pass
-else:
-    # We add ngpus to default field list, if not already there
-    if 'gpus' not in default_fields:
-        # Add it after cpus field or at end
-        try:
-            t = default_fields.index('cpus')
-        except:
-            t = len(default_fields) - 1
-        default_fields.insert(t+1, 'gpus')
-
-    # Set up routine to set default -W values
-    def site_post_opts(gbl, lcl):
-        default_W = lcl['default_W']
-        default_W.extend(['node_detail', 'model'])
-
-    userexit_post_opts = stack_userexit(userexit_post_opts, site_post_opts)
-
-    # Set up routine to tweak outputs based on server
-    def site_set_server(g, lcl):
-        server_name = lcl['current_server'].split('.')[0]
-        cfg = lcl['cfg']
-        svr_hdr = lcl.get('in_server_header', False)
-        supgpu = server_name not in ['pbspl4']
-        if svr_hdr:
-            # Enable/disable all GPU fields in -a node output
-            # If node_detail is selected on a GPU server, we
-            # want to enable GPUs used and free. Otherwise, just
-            # the GPUs field.
-            node_detail = lcl.get('node_detail', False)
-            cfg.change_fieldspec('gpus', suppress=supgpu or node_detail)
-            cfg.change_fieldspec('gused', suppress=supgpu or not node_detail)
-            cfg.change_fieldspec('gfree', suppress=supgpu or not node_detail)
-        else:
-            # Enable/disable job GPU column
-            cfg.change_fieldspec('gpus', suppress=supgpu)
-
-    userexit_set_server = stack_userexit(userexit_set_server, site_set_server)
-
+# === Start of example
+if not args.B and not args.Q:
+    def my_post_opts(gbl, lcl):
+       default_W = lcl['default_W']
+       default_W.extend(['o=seqno,user,queue,jobname'])
+       default_W.extend(['fmt_jobname=maxw:20'])
+    userexit_post_opts = stack_userexit(userexit_post_opts, my_post_opts)
+# === End of example
 .EE
 .PP
 The next example shows what a user might put in their
 .I $HOME/.qstat_userexits
 file.
-This example limits the jobname field to 20 characters and uses "..."
+This example also limits the jobname field to 20 characters and uses "..."
 to indicate parts of the name have been elided.
+It adds display of the first compute node assigned to the job.
 It also turns on the
 .B "-W human"
 option.
@@ -667,6 +631,7 @@ output to 30 characters, when running on a
 particular host.
 
 .EX
+# === Start of example
 if args.B:
     pass
 elif args.Q:
@@ -676,6 +641,7 @@ else:
         default_W = lcl['default_W']
         # Keep jobname field reasonable
         default_W.extend(['fmt_jobname=maxw:20 hj:e rt:...'])
+        default_W.extend(['o=+rank0'])
         # Use human readable durations
         default_W.extend(['human'])
 
@@ -690,6 +656,7 @@ else:
 
     userexit_set_server = stack_userexit(userexit_set_server, my_server)
 
+# === End of example
 .EE
 .SH DEBUGGING OPTIONS
 The

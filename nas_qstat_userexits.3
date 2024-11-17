@@ -13,6 +13,8 @@
 .br
 .B userexit_post_opts(gbl, lcl)
 .br
+.B userexit_post_statjob(gbl, lcl)
+.br
 .B userexit_post_statresv(gbl, lcl)
 .br
 .B userexit_set_server(gbl, lcl)
@@ -143,7 +145,8 @@ formatting options are examined.
 .B userexit_set_server
 Called first after information for jobs has been queried.
 If
-.B \-a option was present, it is called again once the
+.B \-a
+option was present, it is called again once the
 server information has been obtained, but before anything is displayed.
 .TP
 .B userexit_add_fields_a
@@ -179,6 +182,12 @@ Called after normal display fields have been defined and just before
 .B \-W
 formatting options are examined. (Same as
 .BR nas_qstat .)
+.TP
+.B userexit_post_statjob
+Called after
+.B nas_qstat
+queries for jobs, to give the user a chance to add to or modify job
+attributes.
 .TP
 .B userexit_post_statresv
 Called just after
@@ -407,6 +416,19 @@ local variable.
 .RE
 
 .TP
+.B userexit_post_statjob(gbl, lcl)
+Called by
+.B nas_qstat
+after it has queried for information about jobs.
+.sp
+.RS
+Symbols of interest.
+.TP
+.B lcl['bs']
+The batch status from the pbs_statjob or pbs_selstat call.
+Most often, this userexit will be used to add or modify information about
+individual jobs.
+.TP
 .B userexit_post_statresv(gbl, lcl)
 Called by
 .B nas_rstat
@@ -425,6 +447,27 @@ calls.
 .SH NOTES
 .PP
 .SH EXAMPLES
+The following is a simple example showing how to change the default list
+of job fields. It does this by supplying a
+.B "-W o=..."
+option. The second
+.B -W
+option limits the width of the jobname field to 20 characters.
+.EX
+
+# === Start of example
+if not args.B and not args.Q:
+    def my_post_opts(gbl, lcl):
+       default_W = lcl['default_W']
+       default_W.extend(['o=seqno,user,queue,jobname'])
+       default_W.extend(['fmt_jobname=maxw:20 hj:e ht:...'])
+    userexit_post_opts = stack_userexit(userexit_post_opts, my_post_opts)
+# === End of example
+.EE
+.PP
+The stack_userexit() call causes my_post_opts() to be called after any
+post_opts userexit supplied by the site.
+.PP
 The following example might be used by a site with multiple clusters
 where some clusters have GPUs and others do not.
 During initial reading and executing of the script, the field 'gpus'

@@ -1,0 +1,300 @@
+#!/usr/bin/python3
+
+'''Display information about Altair fairshares
+
+This command displays information about PBS fairshares. It is similar
+to pbsfs, but accepts field selections similarly to nas_qstat.
+Unlike pbsfs, it is display only. Use pbsfs to alter fairshare entries.
+'''
+
+import sys
+import os
+import argparse
+import copy
+import math
+import re
+import signal
+import stat
+import struct
+import time
+from sys import stdin, stdout, stderr
+import nas_fsutil as fsu
+from nas_fsutil import share_id_map, share_name_map
+import nas_xstat_config as conf
+import pbs_ifl as ifl
+from nas_pbsutil import *
+import nas_layout as layout
+import nas_field_format
+from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
+
+
+long_desc = __doc__
+gdebug = ''
+version = "0.2"
+
+
+def main():
+    global args, version, gdebug, shost, hostname, pbs_exec, pbs_home
+    global sched_priv, groups_file, usage_file
+    # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
+    for i in range(1, signal.NSIG):
+        try:
+            signal.signal(i, signal.SIG_DFL)
+        except OSError:
+            pass
+    prog = sys.argv[0].split('/')[-1]
+    parser = argparse.ArgumentParser(
+        description=long_desc, prog=prog,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('--debug', default=[], action='append',
+                        help='Debugging arguments (for developers)')
+    parser.add_argument('-f', default=False, action='store_true',
+                        help='output one line per attribute')
+    parser.add_argument('-g', default=False, action='store_true',
+                        help='display details for share group(s)')
+    parser.add_argument('-t', default=False, action='store_true',
+                        help='display as tree')
+    parser.add_argument('-c', '--convert', default=False, action='store_true',
+                        help='scan job_file to collect usage info')
+    parser.add_argument('--groups', action='store',
+                        help="path to scheduler's list of resource groups")
+    parser.add_argument('--job_file', action='store',
+                        help='output from nas_qstat -xf for -c usage info')
+    parser.add_argument('--new_usage', action='store', default='new_usage',
+                        help='where to write -c usage info')
+    parser.add_argument('--usage', action='store',
+                        help='path to input usage file')
+    parser.add_argument('--verbose', '-v', default=0, action='count',
+                        help='increase debugging verbosity')
+    parser.add_argument('--version', action='version',
+                        version='%(prog)s ' + version)
+    parser.add_argument('-W', action='append', metavar='display_option',
+                        help='options affecting field selection and display.'
+                        ' See nas_qstat.1')
+    parser.add_argument('shares', nargs=argparse.REMAINDER,
+                        help='shares to list')
+
+    args = conf.args = parser.parse_args()
+    conf.verbose = verbose = args.verbose
+    conf.gdebug = gdebug = ' '.join(args.debug)
+
+    if (ifl.pbs_loadconf(0) == 0):
+        print("Cannot get PBS configuration information", file=sys.stderr)
+        return 1
+    conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
+    set_paths(pbs_conf)
+    if args.groups:
+        groups_file = args.groups
+    if args.usage:
+        usage_file = args.usage
+    if args.convert:
+        if not args.job_file:
+            print('convert option requires --job_file', file=stderr)
+            return 1
+
+    default_fields = ['name', 'par_id', 'grp_id', 'alloc', 'pct',
+                      'usage', 'ftu', 'fsfact']
+    conf.verbose = args.verbose
+    levels = 0
+    if (levels > 1):
+        print("Use only one of TODO B, F, S, f", file=sys.stderr)
+        return 1
+    # Build list of known fields
+    opts_W = args.W
+    if opts_W is None:
+        opts_W = list()
+    conf.opts_W = opts_W
+    # Load possible user or system overrides
+    more_code = load_userexits('pbsfs')
+    if more_code:
+        prog = compile(more_code, 'userexit code', 'exec')
+        exec(prog, globals(), locals())
+    default_W = []
+    userexit_post_opts(globals(), locals())
+    opts_W[0:0] = default_W
+    known_fields = gen_field_list()
+    # Scan opts_W for on-the-fly field defs
+    define_on_the_fly(known_fields, opts_W)
+    fmtr = NAS_field_format(default_fields)
+    fmtr.known_fields = known_fields
+    userexit_add_fields(globals(), locals())
+    # Handle -W options
+    (field_list, attr_list, errs) = fmtr.collect_fields()
+    if (errs):
+        # Check if should just print list of fields
+        if field_list is None:
+            print('\n'.join(errs))
+            return 0
+        print(errs, file=sys.stderr)
+    rc = fmtr.adjust_formats(field_list)
+    if rc is not True:
+        print(rc, file=sys.stderr)
+        return 1
+    fmtr.field_list = field_list
+    nas_field_format.set_field_vars(opts_W)
+    # Build resource_group tree
+    result = fsu.load_fs_info(groups_file)
+    if isinstance(result, str):
+        print(result, file=stderr)
+        sys.exit(1)
+    (root, patts, weights) = result
+    if root is None:
+        sys.exit(1)
+    # Insert usage info
+    if args.convert:
+        result = fsu.load_usage_from_jobs(args.job_file, root, patts, weights)
+    else:
+        fsu.load_usage(root)
+    fsu.reconcile_usage(root)
+    if args.convert and args.new_usage:
+        result = write_new_usage(args.new_usage, share_id_map.values())
+    if args.f:
+        display_f(args, root, "Group Name", "Group")
+        return 0
+    if args.g:
+        display_g(args, root)
+        return 0
+    # Display it
+    display_standard(root, fmtr)
+    return 0
+
+
+def display_f(args, root, item_tag, json_tag):
+    return 0
+
+
+def display_g(args, root):
+    spc = ''
+    for sname in args.shares:
+        share = fsu.share_name_map.get(sname)
+        if share is None:
+            print(f'Unknown share group {sname} ignored', file=stderr)
+            continue
+        fmt = '%-23s :'
+        print(f'{spc}fairshare entity: {sname}')
+        print(fmt % 'Resgroup', share.par_id)
+        print(fmt % 'cresgroup', share.grp_id)
+        print(fmt % 'Shares', share.alloc)
+        print(fmt % 'Percentage', '%f%%' % (share.tree_pct * 100))
+        print(fmt % 'fairshare_tree_usage', '%f' % share.usage_factor)
+        print(fmt % 'usage', '%.0f' % share.usage)
+        tp = -1.0 if share.tree_pct == 0 else share.usage / share.tree_pct
+        print(fmt % 'usage/perc', '%.0f' % tp)
+        print('Path from root:')
+        fmtb = '%-10s: %5d %10.0f / %5.3f = %.0f'
+        for gpname in share.grp_path:
+            gp = fsu.share_name_map.get(gpname)
+            if gp is None:
+                continue
+            t = -1.0 if gp.tree_pct == 0.0 else gp.usage / gp.tree_pct
+            print(fmtb % (gp.name, gp.grp_id, gp.usage, gp.tree_pct, t))
+        spc = '\n'
+
+
+def display_standard(root, fmtr):
+    '''Output info in standard format
+    TODO
+    Args:
+        root = tree of info for share groups
+        fmtr = field formatter object
+    '''
+    global args
+    c = layout.Config()
+    for fld in fmtr.field_list:
+        title = fld['title']
+        if not title:
+            title = fld['name']
+        c.add_field(title, ident=fld['name'], **fld['format'])
+    rows = list()
+    for share in fsu.depth_first(root, 0) if args.t else share_id_map.values():
+        row = list()
+        for f in fmtr.field_list:
+            func = globals().get(f['func'], None)
+            if not func:
+                print(f"Missing defn for function {f['func']}")
+                continue
+            row.append(func(f, share))
+        rows.append(row)
+    if rows:
+        show_hdr = '-h' not in conf.opts_W
+        res = layout.layout(c, rows, show_hdr=show_hdr)
+        print('\n'.join([x.rstrip() for x in res]))
+
+
+def gen_field_list():
+    '''Generate list of known fields
+
+    Returns: list of field_info dicts for known fields
+    The dict have these key/value pairs
+        name: the name of the field
+        format: dict suitable for passing to layout.add_field()
+        func: name of function to calculate display value
+        sources: reservation attributes whose values are needed by func
+    '''
+    fl = []
+    hjr = {'hj': 'r'}
+    fl.append(gen_field('name', 'Name', None, 'fmt_fs_name', 'name'))
+    fl.append(gen_field('par_id', 'Parent', hjr, 'fmt_fs_int', 'par_id'))
+    fl.append(gen_field('grp_id', 'Grp_id', hjr, 'fmt_fs_int', 'grp_id'))
+    fl.append(gen_field('alloc', 'Shares', hjr, 'fmt_fs_int', 'alloc'))
+    fl.append(gen_field('usage', 'Usage', hjr, 'fmt_fs_usage', 'usage'))
+    fl.append(gen_field('pct', 'Share%', hjr, 'fmt_fs_pct', 'tree_pct'))
+    fl.append(gen_field('ftu', 'FTU', hjr, 'fmt_fs_factor', 'usage_factor'))
+    fl.append(gen_field('fsfact', 'Factor', hjr, 'fmt_fs_factor', 'fs_factor'))
+    return fl
+
+
+def fmt_fs_factor(fi, info):
+    '''Format a factor betwen 0 and 1, given by sources'''
+    t = fi['sources'][0]
+    val = getattr(info, t)
+    return "%0.3g" % val
+
+
+def fmt_fs_int(fi, info):
+    '''Format an integer given by sources'''
+    t = fi['sources'][0]
+    val = getattr(info, t)
+    return str(val)
+
+
+def fmt_fs_name(fi, info):
+    '''Format share name'''
+    global args
+    val = info.name
+    if args.t:
+        val = ' ' * info.depth + val
+    return val
+
+
+def fmt_fs_pct(fi, info):
+    '''Format a percentage given by sources'''
+    t = fi['sources'][0]
+    val = getattr(info, t) * 100.0
+    return "%3.2f%%" % val
+
+
+def fmt_fs_usage(fi, info):
+    '''Format a share usage'''
+    usage = info.usage
+    return "%.3f" % usage
+
+
+def set_paths(pbs_conf):
+    global pbs_home, pbs_exec, hostname, shost, sched_priv
+    global groups_file, usage_file
+    pbs_home = pbs_conf.pbs_home_path
+    pbs_exec = pbs_conf.pbs_exec_path
+    hostname = pbs_conf.pbs_server_name
+    shost = hostname.split('.')[0]
+    sched_priv = os.path.join(pbs_home, 'sched_priv')
+    groups_file = os.path.join(sched_priv, 'resource_group')
+    usage_file = os.path.join(sched_priv, 'usage')
+    fsu.set_fs_info(shost, gf=groups_file, uf=usage_file)
+
+
+if __name__ == '__main__':
+
+    sys.exit(main())
+# vi:ts=4:sw=4:expandtab
