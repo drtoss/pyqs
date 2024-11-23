@@ -298,6 +298,40 @@ def load_usage(root):
     return
 
 
+def load_usage_from_jobs(fname, tree, patts, weights):
+    global asof_time
+    from nas_pbsutil import lines_to_stat
+    if fname == '-':
+        fs = stdin
+    else:
+        fs = open(fname)
+        stat_buf = os.stat(fname)
+        asof_time = stat_buf.st_mtime
+    lines = fs.read()
+    if fname != '-':
+        fs.close()
+    interesting = ['egroup', 'euser', 'resources_used', 'schedselect',
+                   'Account_Name', 'job_state', 'obittime', 'stime']
+    jobs = lines_to_stat(lines, interesting)
+    del lines
+    for job in jobs:
+        jobname = job['id']
+        entity = set_account_name(job, patts)
+        if entity not in share_name_map:
+            print(f'Unknown entity for job {jobname}', file=stderr)
+            entity = UNKNOWN_GROUP_NAME
+        sbu_rate = set_sbu_rate_nh(job, weights)
+        if isinstance(sbu_rate, str):
+            print(f'Cannot compute SBU rate for job {jobname} {sbu_rate}',
+                  file=stderr)
+            continue
+        effective_wt = calc_aged_walltime(job)
+        eff_sbus = sbu_rate * effective_wt
+        share = share_name_map[entity]
+        share.usage += eff_sbus
+    return True
+
+
 def calc_aged_walltime(job):
     '''Calculate walltime after decay
 
@@ -370,10 +404,12 @@ def set_account_name(job, patts, requestor=None):
     entity = job.get('Account_Name')
     if entity and trust_job_info:
         return entity
-    euser = job['euser']
+    euser = job.get('euser')
     if euser == None:
+        if requestor is None:
+            return None
         euser = requestor.split('@')[0]
-    egroup = job['egroup']
+    egroup = job.get('egroup')
     if egroup == None:
         gl = job.get('group_list')
         if gl:
@@ -745,6 +781,30 @@ def split_share_info(fname, buf):
             continue
         nodes.append((lineno, flds))
     return (nodes, patterns, weights)
+
+
+def write_new_usage(fname, shares):
+    '''Write out current usage information in Altair binary format
+
+    Args:
+        fname = file to write to
+        shares = current shares info
+    '''
+    # Write out header
+    global gnow
+    buf = bytearray()
+    hdr_fmt = '9sdl'
+    t = struct.pack(hdr_fmt, bytes(MAGIC_NAME, 'utf-8'), 2.0, int(gnow))
+    buf += t
+    use_fmt = '50sd'
+    for share in shares:
+        if share.usage <= 0.0:
+            continue
+        t = struct.pack(use_fmt, bytes(share.name, 'utf-8'), share.usage)
+        buf += t
+    with open(fname, mode='wb') as fs:
+        fs.write(buf)
+    return
 
 
 clockre = re.compile(r'((\d+)\+)?(\d+):(\d+)(:(\d+))?$')
