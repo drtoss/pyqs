@@ -88,6 +88,7 @@ def main():
         groups_file = args.groups
     if args.usage:
         usage_file = args.usage
+    fsu.set_fs_info(None, gf=groups_file, uf=usage_file)
     if args.convert:
         if not args.job_file:
             print('convert option requires --job_file', file=stderr)
@@ -143,12 +144,13 @@ def main():
         sys.exit(1)
     # Insert usage info
     if args.convert:
+        fsu.set_fs_info(None, tj=True)
         result = fsu.load_usage_from_jobs(args.job_file, root, patts, weights)
+        if args.new_usage:
+            result = fsu.write_new_usage(args.new_usage, share_id_map.values())
     else:
         fsu.load_usage(root)
     fsu.reconcile_usage(root)
-    if args.convert and args.new_usage:
-        result = write_new_usage(args.new_usage, share_id_map.values())
     if args.f:
         display_f(args, root, "Group Name", "Group")
         return 0
@@ -278,7 +280,7 @@ def fmt_fs_pct(fi, info):
 def fmt_fs_usage(fi, info):
     '''Format a share usage'''
     usage = info.usage
-    return "%.3f" % usage
+    return "%.3f" % (usage / 3600.0)
 
 
 def set_paths(pbs_conf):
