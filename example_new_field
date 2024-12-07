@@ -1,0 +1,27 @@
+if not args.B and not args.Q:
+    # Define a formatter to calculate expansion factor
+    # It is defined as (walltime + waittime) / walltime
+    def my_add_fields(gbl, lcl):
+        def fmt_expansion(fi, info):
+            state = info.get('job_state', '?')
+            if state in 'FX':
+                wallt = info.get('resources_used.walltime', None)
+            else:
+                wallt = info.get('Resource_List.walltime', None)
+            qtime = info.get('qtime', None)
+            stime = info.get('stime', None)
+            if wallt and qtime and stime:
+                wallt = clocktosecs(wallt)
+                t = (wallt + int(stime) - int(qtime)) / wallt
+                return "%0.2f" % t
+            return '--'
+        setattr(nas_field_format, 'fmt_expansion', fmt_expansion)
+
+        fmtr = lcl.get('fmtr')
+        needed_attr = 'job_state resources_used Resource_List qtime stime'
+        t = gen_field('expf', 'Expf', {'hj': 'r'}, 'fmt_expansion',
+            needed_attr)
+        fmtr.known_fields.append(t)
+    userexit_add_fields = stack_userexit(userexit_add_fields, my_add_fields)
+
+# vi:ts=4:sw=4:expandtab:syntax=python
