@@ -75,12 +75,18 @@ def set_fs_info(hn, **kwds):
     if hn:
         shost = hn.split('.')[0]
     for (key, value) in kwds.items():
-        if key == 'df': fs_decay_factor = value
-        if key == 'dt': fs_decay_time = value
-        if key == 'gf': groups_file = value
-        if key == 'tj': trust_job_info = value
-        if key == 'ua': unknown_alloc = value
-        if key == 'uf': usage_file = value
+        if key == 'df':
+            fs_decay_factor = value
+        if key == 'dt':
+            fs_decay_time = value
+        if key == 'gf':
+            groups_file = value
+        if key == 'tj':
+            trust_job_info = value
+        if key == 'ua':
+            unknown_alloc = value
+        if key == 'uf':
+            usage_file = value
         if key == 'rs':
             share_name_map.clear()
             share_id_map.clear()
@@ -405,16 +411,16 @@ def set_account_name(job, patts, requestor=None):
     if entity and trust_job_info:
         return entity
     euser = job.get('euser')
-    if euser == None:
+    if euser is None:
         if requestor is None:
             return None
         euser = requestor.split('@')[0]
     egroup = job.get('egroup')
-    if egroup == None:
+    if egroup is None:
         gl = job.get('group_list')
         if gl:
             egroup = str(gl).split(',')[0].split('@')[0]
-    if egroup == None:
+    if egroup is None:
         try:
             pwinfo = pwd.getpwnam(euser)
             grinfo = grp.getgrgid(pwinfo[3])
@@ -499,6 +505,7 @@ def set_sbu_rate_hook(job, weights):
         return rate
     R['sbu_rate'] = rate
     return rate
+
 
 def calc_sbus(select, weights):
     '''Calculate SBU rate from select statement

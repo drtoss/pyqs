@@ -501,7 +501,7 @@ def fmt_mission(fi, info):
     global gshare_entity_info
     entity = info.get('share_entity', None)
     if not entity:
-        entity = info.get('egroup','') + ':' + info.get('euser','')
+        entity = info.get('egroup', '') + ':' + info.get('euser', '')
     t = gshare_entity_info.get(entity, dict())
     leader = t.get('leader', '--')
     return leader
@@ -603,6 +603,7 @@ def fmt_resv_state(fi, info):
     if rawv.isdigit():
         return decode_resv_state(rawv)
     return decode_resv_state_str(rawv)
+
 
 def fmt_resv_states(fi, info):
     rawv = info.get('reserve_state', '--')
