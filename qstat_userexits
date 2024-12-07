@@ -1,6 +1,8 @@
-# Enable NAS-specific features
-globals()['gNAS'] = True
-
+# This example set of system-wide userexits is similar to what is used
+# at NAS.
+# Of note is the way fields related to GPUs are displayed/hidden based
+# on which server is being queried. (pbspl4 and server2 nodes have GPUs)
+#
 # Possibly do different things based on whether we are statusing servers,
 # queues, or jobs
 if args.B:
