@@ -18,14 +18,28 @@ import stat
 import struct
 import time
 from sys import stdin, stdout, stderr
-import nas_fsutil as fsu
-from nas_fsutil import share_id_map, share_name_map
-import nas_xstat_config as conf
-import pbs_ifl as ifl
-from nas_pbsutil import *
-import nas_layout as layout
-import nas_field_format
-from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
+
+# Need to add local libraries to sys.path
+
+t = os.path.dirname(sys.argv[0])
+t = os.path.abspath(t)
+if t not in sys.path:
+    sys.path.insert(0, t)
+(head, tail) = os.path.split(t)
+if tail == 'bin':
+    t = os.path.join(head, 'lib')
+    if t not in sys.path and os.path.exists(t):
+        sys.path.insert(1, t)
+if True:
+    # Indented to avoid gripes from PEP-8 checkers
+    import nas_fsutil as fsu
+    from nas_fsutil import share_id_map, share_name_map
+    import nas_xstat_config as conf
+    import pbs_ifl as ifl
+    from nas_pbsutil import *
+    import nas_layout as layout
+    import nas_field_format
+    from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
 
 
 long_desc = __doc__
