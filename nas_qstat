@@ -70,7 +70,7 @@ def check_perms():
             if t not in sys.path:
                 sys.path.insert(0, t)
             # If path ends in bin, try to add equivalent lib directory
-            (head,tail) = os.path.split(t)
+            (head, tail) = os.path.split(t)
             if tail != 'bin':
                 continue
             t = os.path.join(head, 'lib')
@@ -1311,7 +1311,8 @@ def gen_field_list():
                         'resources_used Resource_List', 'mem'))
     fl.append(gen_field('minwallt', ['Min', 'wallt'], rj, 'fmt_from_rsrc_tm',
                         'Resource_List', 'min_walltime'))
-    fl.append(gen_field('mission', 'Mission', None, 'fmt_mission', 'egroup euser Priority'))
+    fl.append(gen_field('mission', 'Mission', None, 'fmt_mission',
+                        'egroup euser Priority'))
     fl.append(gen_field('model', 'Model', None, 'fmt_model', 'schedselect'))
     fl.append(gen_field('nds', 'Nds', rj, 'fmt_from_rsrc',
                         'resources_used Resource_List', 'nodect'))

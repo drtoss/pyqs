@@ -512,29 +512,29 @@ def bs_item_to_json(bs, lvl):
 # Utility functions copied from PTL's BatchUtils class
 
 
-def list_to_attrl(l):
+def list_to_attrl(li):
     """
     Convert a list to a PBS attribute list
 
-    :param l: List to be converted
-    :type l: List
+    :param li: List to be converted
+    :type li: List
     :returns: PBS attribute list
     """
-    return list_to_attropl(l, None)
+    return list_to_attropl(li, None)
 
 
-def list_to_attropl(l, op=ifl.SET):
+def list_to_attropl(li, op=ifl.SET):
     """
     Convert a list to a PBS attribute operation list
 
-    :param l: List to be converted
-    :type l: List
+    :param li: List to be converted
+    :type li: List
     :returns: PBS attribute operation list
     """
     head = None
     prev = None
 
-    for i in l:
+    for i in li:
         a = str_to_attropl(i, op)
         if prev is None:
             head = a
