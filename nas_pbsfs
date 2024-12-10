@@ -18,14 +18,28 @@ import stat
 import struct
 import time
 from sys import stdin, stdout, stderr
-import nas_fsutil as fsu
-from nas_fsutil import share_id_map, share_name_map
-import nas_xstat_config as conf
-import pbs_ifl as ifl
-from nas_pbsutil import *
-import nas_layout as layout
-import nas_field_format
-from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
+
+# Need to add local libraries to sys.path
+
+t = os.path.dirname(sys.argv[0])
+t = os.path.abspath(t)
+if t not in sys.path:
+    sys.path.insert(0, t)
+(head, tail) = os.path.split(t)
+if tail == 'bin':
+    t = os.path.join(head, 'lib')
+    if t not in sys.path and os.path.exists(t):
+        sys.path.insert(1, t)
+if True:
+    # Indented to avoid gripes from PEP-8 checkers
+    import nas_fsutil as fsu
+    from nas_fsutil import share_id_map, share_name_map
+    import nas_xstat_config as conf
+    import pbs_ifl as ifl
+    from nas_pbsutil import *
+    import nas_layout as layout
+    import nas_field_format
+    from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
 
 
 long_desc = __doc__
@@ -88,6 +102,7 @@ def main():
         groups_file = args.groups
     if args.usage:
         usage_file = args.usage
+    fsu.set_fs_info(None, gf=groups_file, uf=usage_file)
     if args.convert:
         if not args.job_file:
             print('convert option requires --job_file', file=stderr)
@@ -143,12 +158,13 @@ def main():
         sys.exit(1)
     # Insert usage info
     if args.convert:
+        fsu.set_fs_info(None, tj=True)
         result = fsu.load_usage_from_jobs(args.job_file, root, patts, weights)
+        if args.new_usage:
+            result = fsu.write_new_usage(args.new_usage, share_id_map.values())
     else:
         fsu.load_usage(root)
     fsu.reconcile_usage(root)
-    if args.convert and args.new_usage:
-        result = write_new_usage(args.new_usage, share_id_map.values())
     if args.f:
         display_f(args, root, "Group Name", "Group")
         return 0
@@ -278,7 +294,7 @@ def fmt_fs_pct(fi, info):
 def fmt_fs_usage(fi, info):
     '''Format a share usage'''
     usage = info.usage
-    return "%.3f" % usage
+    return "%.3f" % (usage / 3600.0)
 
 
 def set_paths(pbs_conf):
