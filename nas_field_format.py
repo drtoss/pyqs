@@ -146,11 +146,13 @@ class NAS_field_format(object):
                 errlist.append("Known fields: " + ', '.join(names))
                 return (None, None, errlist)
             # Only interested in changes to list of fields
-            mo = re.match(tag + r'=([+-]?)(.*)', opt)
+            mo = re.match(tag + r'([+-]?)=([+-]?)(.*)', opt)
             if not mo:
                 continue
             plusminus = mo.group(1)
-            names = mo.group(2).split(',')
+            if plusminus == '':
+                plusminus = mo.group(2)
+            names = mo.group(3).split(',')
             if plusminus == '':
                 fl = [n.strip() for n in names]
             elif plusminus == '-':
