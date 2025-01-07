@@ -221,12 +221,16 @@ def load_userexits(prefix):
         pbs_exec = t
     if pbs_exec:
         path = os.path.join(pbs_exec, 'lib', 'site', '%s_userexits' % prefix)
+        if not os.path.exists(path):
+            # Try site directory where we were loaded from
+            t = os.path.split(__spec__.origin)
+            path = os.path.join(t[0], 'site', '%s_userexits' % prefix)
         try:
             sbuf = os.stat(path)
             # Be careful about what we load
             if sbuf:
                 if sbuf.st_uid == 0 or sbuf.st_uid == user:
-                    mode = stat.S_ISDIR(sbuf.st_mode)
+                    mode = stat.S_IMODE(sbuf.st_mode)
                     if (mode & (stat.S_IWGRP | stat.S_IWOTH)) == 0:
                         with open(path) as f:
                             code += f.read()
