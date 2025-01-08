@@ -141,6 +141,17 @@ version = "0.2"
 conf.gNow = gNow
 conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
 
+# NAS hack to support -ee to invoke standard qstat
+
+if '-ee' in sys.argv:
+    sys.argv.remove('-ee')
+    ifl.pbs_loadconf(0)
+    path = os.path.join(pbs_conf.pbs_exec_path, 'bin', 'qstat')
+    sys.argv[0] = path
+    os.execv(path, sys.argv)
+    # Not reached
+    sys.exit(1)
+
 
 def main():
     global gNAS, verbose, args, opts_W, host_re, gdebug
