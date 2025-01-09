@@ -146,11 +146,13 @@ class NAS_field_format(object):
                 errlist.append("Known fields: " + ', '.join(names))
                 return (None, None, errlist)
             # Only interested in changes to list of fields
-            mo = re.match(tag + r'=([+-]?)(.*)', opt)
+            mo = re.match(tag + r'([+-]?)=([+-]?)(.*)', opt)
             if not mo:
                 continue
             plusminus = mo.group(1)
-            names = mo.group(2).split(',')
+            if plusminus == '':
+                plusminus = mo.group(2)
+            names = mo.group(3).split(',')
             if plusminus == '':
                 fl = [n.strip() for n in names]
             elif plusminus == '-':
@@ -501,7 +503,7 @@ def fmt_mission(fi, info):
     global gshare_entity_info
     entity = info.get('share_entity', None)
     if not entity:
-        entity = info.get('egroup','') + ':' + info.get('euser','')
+        entity = info.get('egroup', '') + ':' + info.get('euser', '')
     t = gshare_entity_info.get(entity, dict())
     leader = t.get('leader', '--')
     return leader
@@ -603,6 +605,7 @@ def fmt_resv_state(fi, info):
     if rawv.isdigit():
         return decode_resv_state(rawv)
     return decode_resv_state_str(rawv)
+
 
 def fmt_resv_states(fi, info):
     rawv = info.get('reserve_state', '--')

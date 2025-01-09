@@ -25,10 +25,11 @@ for the attributes of interest.)
 The current python qstat (called “nas\_qstat”) recognizes the
 following fields:
 
-Acct Aoe Cpct Cput Ctime Eff Elapwallt Eligstart Eligtime Endtime EstStart
-ExitStatus Group JobID Jobname Lifetime Maxwallt Memory Minwallt Mission
-Model Nds Place Pmem Pri Qtime Queue ReqID Reqmem Remwallt Reqdwallt
-Runs S SessID SeqNo Ss Stime TSK User Vmem.
+Acct Aoe Comment Cnt Cpct Cpus Cput Ctime Eff ElapWallt EligStart
+EligTime EstEnd EstStart Exechost ExitStatus Gpus Group JobID Jobname
+Lifetime MaxWallt Memory MinWallt Mission Model Nds Place Pmem Pri Qtime
+Queue Rank0 Reqid ReqMem RemWallt ReqdWallt Runs S Sessid SeqNo SS Stime
+User Vmem
 
 Some of the fields are sourced directly from the pbs\_statjob results
 and others are computed (e.g., eff = CPU efficiency).
@@ -117,8 +118,13 @@ script builds the pbs\_ifl module to give python access to PBS's IFL
 routines.
 
 Pieces:
+* example\_new\_field -- Example defining new field for nas\_qstat (in this case, expansion factor)
+* make\_tar.sh -- Script to build tar file for installation
 * nas\_field\_format.py -- Functions to compute string values for fields
+* nas\_fsutil.py -- Utility functions for fairshare data
 * nas\_layout.py -- The layout engine that handles field justification, widths, headers, etc.
+* nas\_pbsfs -- Python command to display fairshare information
+* nas\_pbsfs.8 -- Man page for nasi\_pbsfs
 * nas\_pbsutil.py -- Interfaces to PBS not supplied by pbs\_ifl.i
 * nas\_qstat -- Main routine of python qstat
 * nas\_qstat.1 -- Man page for nas\_qstat
@@ -126,6 +132,7 @@ Pieces:
 * nas\_rstat -- Python version of pbs\_rstat (used as prototype for nas\_qstat)
 * nas\_xstat\_config.py -- Global variables for nas\_qstat and nas\_rstat
 * pbs\_ifl.i -- Slightly modified version of OpenPBS's swig input file to build pbs\_ifl module
+* qstat\_fs\_exits -- Example site userexits for adding fairshare info to nas\_qstat
 * qstat\_userexits -- Example site userexits, including GPU handling
 
 The build\_pbs\_ifl script creates these files:
@@ -139,23 +146,28 @@ TCL qstat takes ~20 seconds, so this version is already better than what
 NAS has been using.)
 
 # INSTALLATION #
-Assume you want to install this under PBS\_EXEC/unsupported. First, create
-appropriate subdirectories there and copy the pieces in.
+Assume you want to install this under PBS\_EXEC/unsupported.  Run
 ```
- umask 022 # Make sure everyone has access
- source /etc/pbs.conf # Or set PBS_EXEC directly
- mkdir -p $PBS_EXEC/unsupported/bin
- mkdir -p $PBS_EXEC/unsupported/man
- mkdir -p $PBS_EXEC/unsupported/man/man1
- mkdir -p $PBS_EXEC/unsupported/man/man3
+ ./make_tar.sh
+```
+It creates a dummy install directory in TMPDIR and then tars that up
+into nas\_qstat.tgz.  You can install that where you want. For example,
+to install in $PBS\_EXEC/unsupported/, run (as root)
 
- cp *.py nas_qstat nas_rstat _pbs_ifl.so $PBS_EXEC/unsupported/bin/
- cp nas_qstat.1 $PBS_EXEC/man/man1/
- cp nas_qstat_userexits.3 $PBS_EXEC/man/man3/
 ```
-Now, make a copy of qstat\_userexits and modify it as appropriate
-for your site. Install that with:
+ tar -C PBS_EXEC/unsupported -xzf nas_qstat.tgz
 ```
- mkdir -p $PBS_EXEC/lib/site
- cp qstat_userexits_copy $PBS_EXEC/lib/site/qstat_userexits
+You will want to edit PBS\_EXEC/unsupported/lib/site/qstat\_userexits to
+suit your local site. Or remove it entirely to get default nas\_qstat 
+behavior.
+
+You can experiment with nas\_qstat as a normal user without installing it.
+Create the .tgz file as above and extract it in some directory of your
+choosing.  Set the NAS\_QSTAT\_EXEC environment variable to the path
+where you extracted the files and run nas\_qstat from there:
+
+```
+ export NAS_QSTAT_EXEC=/some/place/of/your/choosing
+ tar -C $NAS_QSTAT_EXEC -xzf nas_qstat.tgz
+ $NAS_QSTAT_EXEC/bin/nas_qstat ...
 ```

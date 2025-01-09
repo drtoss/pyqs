@@ -1,0 +1,218 @@
+.TH NAS_PBSFS 1 "2024-11-04" Local "OpenPBS contributions"
+.SH NAME
+.B nas_pbsfs
+- work with Altair's scheduler's fairshare data
+
+.SH SYNOPSIS
+.RE
+.B Displaying Fairshare Status
+.RS 5
+.B nas_pbsfs
+[--groups group_file] [--usage usage_file] [-t] [-W display_option] [-g group ...]
+.sp
+.RE
+.B Creating A Usage File
+.RS 5
+.B nas_pbsfs
+[-c|--convert] [--groups groups_file] [--job_file job_file] [--new_usage new_usage_file]
+.sp
+.RE
+.B Version Information
+.RS 5
+.B nas_pbsfs
+--version
+.SH DESCRIPTION
+The
+.B nas_pbsfs
+command serves three functions related to the fairshare data used by
+Altair's PBS scheduler.
+The primary function is to display current values.
+In this, it is like the
+.B pbsfs
+command supplied with PBS, but with a different output format.
+.PP
+The second function is to take existing and historical job information
+and match it with a new resource_group file to see how that would
+affect group usages.
+.PP
+The third function takes the same job and resource_group information
+and writes a new usage file from it. This can then be fed to
+.B nas_qstat
+to experiment with different JOB_SORT_FORMULAs to see their effect
+on job sorting.
+.SH OPTIONS
+.B Generic Options
+.IP "-h --help" 10
+Displays brief description of options.
+.IP "--debug" 10
+Debugging options for developers.
+.IP "--verbose" 10
+Increase debugging verbosity.
+.IP "--version" 10
+Display version of
+.BR nas_pbsfs .
+.PP
+.B Options For Displaying Fairshare Information
+.IP "-t" 10
+Display groups in a tree, with sub-groups indented below their parent
+group.
+.IP "--groups group_file"
+Specify a different group file from the default
+.IR PBS_HOME/sched_priv/resource_group .
+.IP "--usage usage_file"
+Specify a different group usage file from the default
+.IR PBS_HOME/sched_priv/usage .
+.IP "-W option"
+Specify which fields to display and how they should be displayed.
+See
+.B nas_qstat.1
+for how to use the
+.I -W
+option to affect displayed fields.
+The full list of fields can be obtained by specifying
+.IR "-W o=?" .
+The list of known fields can be changed by the site administrator or by
+the user.
+The current list of fields is
+name, par_id, grp_id, alloc, usage, pct, ftu, fsfact.
+.RS
+.TP
+.B name
+The name of the entity group.
+
+.TP
+.B par_id
+(parent\ id) The group's parent's id ("Grp" in
+.BR pbsfs ).
+.TP
+.B grp_id
+(group\ id) The id for the group ("cgrp" in
+.BR pbsfs ).
+.TP
+.B alloc
+(allocation) The group's allocation ("Shares" in
+.BR pbsfs ).
+.TP
+.B pct
+(percentage) What percent of the total allocations this group's
+allocation represents ("Perc" in
+.BR pbsfs ).
+.TP
+.B usage
+The group's current resource usage, as decayed by the scheduler.
+.TP
+.B ftu
+(fairshare\ tree\ usage) A number between 0 and 1 that reflects how
+much of total usage the group is responsible for.
+.TP
+.B fsfact
+(fairshare\ factor) The relative fairness factor, available to
+JOB_SORT_FORMULA as "fairshare_factor").
+.RE
+.SH EXIT STATUS
+.B nas_pbsfs
+exits 0 on success, and >0 if an error occurs.
+.SH ENVIRONMENT
+The following environment variables affect
+.B nas_pbsfs
+.TP
+NAS_FSUTIL_DEBUG Used to supply debugging options similar to the
+.I "--debug"
+option.
+.TP
+PBS_CONF_FILE and other PBS_xxx environment variables.  See
+.B pbs.conf(8B)
+for information.
+.SH FILES
+.TP
+.B PBS_HOME/sched_priv/resource_group
+The list of entities that consume resources and their shares.
+.TP
+.B PBS_HOME/sched_priv/usage
+The current aged resource usage, by entity.
+.SH USEREXITS
+.B nas_pbsfs
+loads userexit code from
+.B PBS_EXEC/lib/site/pbsfs_userexits
+and
+.BR $HOME/.pbsfs_userexits .
+From those sources,
+.B nas_pbsfs
+runs the
+.B userexit_post_opts
+and
+.B userexit_add_fields
+routines.
+See the
+.B nas_qstat_userexits
+man page for more information.
+.SH EXAMPLES
+To display the current fairshare usage table:
+.sp
+.EX
+$ nas_pbsfs
+Name     Parent Grp_id Shares  Share% Usage FTU Factor
+-------- ------ ------ ------ ------- ----- --- ------
+TREEROOT     -1      0    117 100.00% 0.000   0      1
+Math          0    100     30  50.00% 0.000   0      1
+Phys          0    200     20  33.33% 0.000   0      1
+Applied     100    110     25  25.00% 0.000   0      1
+Bob         100    101     15  15.00% 0.000   0      1
+Tom         100    102     10  10.00% 0.000   0      1
+Mary        110    111      1   8.33% 0.000   0      1
+Sally       110    112      2  16.67% 0.000   0      1
+John        200    201      2  16.67% 0.000   0      1
+Joe         200    202      2  16.67% 0.000   0      1
+unknown       0      1     10  16.67% 0.000   0      1
+
+.EE
+Same, but display it with child entities indented under their parents:
+.sp
+.EX
+$ nas_pbsfs -t
+Name      Parent Grp_id Shares  Share% Usage FTU Factor
+--------- ------ ------ ------ ------- ----- --- ------
+TREEROOT      -1      0    117 100.00% 0.000   0      1
+ Math          0    100     30  50.00% 0.000   0      1
+  Applied    100    110     25  25.00% 0.000   0      1
+   Mary      110    111      1   8.33% 0.000   0      1
+   Sally     110    112      2  16.67% 0.000   0      1
+  Bob        100    101     15  15.00% 0.000   0      1
+  Tom        100    102     10  10.00% 0.000   0      1
+ Phys          0    200     20  33.33% 0.000   0      1
+  Joe        200    202      2  16.67% 0.000   0      1
+  John       200    201      2  16.67% 0.000   0      1
+ unknown       0      1     10  16.67% 0.000   0      1
+
+.EE
+Now, suppose you want to see how a new set of resource usage entities
+would affect the relative uses. Use the
+.I "--convert"
+option for that.
+You first need to run
+.B nas_qstat
+to collect historical data.
+Then, feed that with the proposed new resource_group contents to
+see how the uses would change.
+
+.EX
+$ nas_qstat -xf > qstat_xf.txt
+$ nas_pbsfs --convert --job_file qstat_xf.txt --groups new_rg
+Unknown entity for job 7014.rhserver
+Name     Parent Grp_id Shares  Share%   Usage      FTU Factor
+-------- ------ ------ ------ ------- ------- -------- ------
+TREEROOT     -1      0    117 100.00% 308.410        0      1
+Math          0    100     30  50.00% 244.502    0.793  0.333
+Phys          0    200     20  33.33%   0.243 0.000786  0.998
+Applied     100    110     25  25.00%  17.499    0.425  0.308
+Bob         100    101     15  15.00% 227.003    0.753 0.0308
+Tom         100    102     10  10.00%   0.000    0.159  0.333
+Mary        110    111      1   8.33%  12.059    0.168  0.248
+Sally       110    112      2  16.67%   5.440    0.289  0.301
+John        200    201      2  16.67%   0.000 0.000393  0.998
+Joe         200    202      2  16.67%   0.243 0.000786  0.997
+unknown       0      1     10  16.67%  63.665    0.206  0.424
+
+.SH SEE ALSO
+nas_qstat(1),
+nas_qstat_userexits(3)

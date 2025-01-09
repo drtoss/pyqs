@@ -68,7 +68,7 @@ def check_perms():
             if t not in sys.path:
                 sys.path.insert(0, t)
             # If path ends in bin, try to add equivalent lib directory
-            (head,tail) = os.path.split(t)
+            (head, tail) = os.path.split(t)
             if tail != 'bin':
                 continue
             t = os.path.join(head, 'lib')

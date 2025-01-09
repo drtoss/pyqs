@@ -1,0 +1,157 @@
+# This set of nas_qstat user exits shows how to use the nas_fsutil python
+# module to add fairshare information to the nas_qstat output.
+
+# The add_fields exit adds two fields, sbu_rate and jfv, to the fields
+# available from nas_qstat. The sbu_rate displays the NAS local job
+# attribute "sbu_rate" which measures how quickly a job accumulates
+# charges. The jsv field (job sort formula value) displays the value
+# of the job_sort_formula used by the scheduler at NAS.
+
+# The post_job_stat user exit calculates the jsv value and adds it to
+# the job info so it is available to the fmt_jfv routine.
+# At non-NAS sites, you'll need to change some of the constants near
+# the beginning as well as the value of formula later on.
+
+if not args.B and not args.Q:
+    # Define routine to set default -W values
+    def my_post_opts(gbl, lcl):
+        default_W = lcl['default_W']
+        default_W.extend(['NAS'])
+        default_W.extend(['o=+sbu_rate,jfv'])
+        # Disable the default sort so we can sort by jsv
+        default_W.extend(['do_sort=f'])
+
+    userexit_post_opts = stack_userexit(userexit_post_opts, my_post_opts)
+
+    # Add our fields
+    def my_add_fields(gbl, lcl):
+
+        def fmt_sbu_rate(fi, info):
+            # sbu_rate
+            rate = info.get('Resource_List.sbu_rate')
+            if rate is not None:
+                rate = float(rate)
+                return "%0.2f" % rate
+            return '--'
+        setattr(nas_field_format, 'fmt_sbu_rate', fmt_sbu_rate)
+
+        def fmt_jfv(fi, info):
+            # job formula value
+            rval = info.get('jsf_value')
+            if rval is not None:
+                return "%.1f" % rval
+            return '--'
+        setattr(nas_field_format, 'fmt_jfv', fmt_jfv)
+        fmtr = lcl.get('fmtr')
+        t = gen_field('sbu_rate', 'SBU_rate', {'hj': 'r'}, 'fmt_sbu_rate',
+            'resources_used Resource_List schedselect')
+        fmtr.known_fields.append(t)
+        t = gen_field('jfv', ['Formula', 'value'], {'hj': 'r'}, 'fmt_jfv',
+            'resources_used egroup Account_Name eligible_time queue')
+        fmtr.known_fields.append(t)
+    userexit_add_fields = stack_userexit(userexit_add_fields, my_add_fields)
+
+    # Add stuff for Altair fairshare
+    import nas_fsutil as fsu
+    globals()['fsu'] = fsu
+    import math
+    globals()['math'] = math
+    # Comment the following line to use default sources for data
+    #fsu.set_fs_info(None, gf='test_shares', uf='/PBS/sched_priv/usage')
+    result = fsu.load_fs_info(fsu.groups_file)
+    if isinstance(result, str):
+        print(f'Problem loading fs info: {result}', file=sys.stderr)
+        sys.exit(1)
+    (fs_tree, fs_patts, fs_weights) = result
+    globals()['fs_tree'] = fs_tree
+    globals()['fs_patts'] = fs_patts
+    globals()['fs_weights'] = fs_weights
+    fsu.load_usage(fs_tree)
+
+    def my_post_statjob(g, lcl):
+        # Need to get info about queues
+        # TODO for now, fetch from file
+        sname = lcl['sname']
+        gdebug = g['gdebug']
+        qfile = check_W_str('queues')
+        if qfile:
+            t = ' fake_%s_%s=%s' % ('queues', sname, qfile)
+            gdebug += t
+        qbs = file_to_stat(sname, 'queues')
+        qinfo = dict()
+        if not qbs:
+            print(f'Missing cache file for {sname} queues')
+        else:
+            for x in qbs:
+                qname = x['id']
+                qinfo[qname] = x
+        fsu.set_fs_info(None, fm=True)
+        bs = lcl['bs']
+        for job in bs:
+            jobname = job['id']
+            sbu_rate = fsu.set_sbu_rate_nh(job, fs_weights)
+            if isinstance(sbu_rate, str):
+                print(f'Cannot get sbu_rate for {jobname}')
+                job['Resource_List.sbu_rate'] = sbu_rate = 0.0
+            entity = fsu.set_account_name(job, fs_patts)
+            if not entity:
+                print(f'Cannot get entity for {jobname}')
+                entity = fsu.UNKNOWN_GROUP_NAME
+                job['Account_Name'] = entity
+            effective_wt = fsu.calc_aged_walltime(job)
+            eff_sbus = sbu_rate * effective_wt / 3600.0
+            share = fsu.share_name_map[entity]
+            share.usage += eff_sbus
+        for share in fsu.share_id_map.values():
+            if share.usage == 0.0:
+                share.usage = 1.0
+        fsu.reconcile_usage(fs_tree)
+        # Now that we have share factors, compute job_sort_formulas
+        formula = '''fairshare_factor * 1e9 + (job_priority if job_priority != 0 else (queue_priority + min(20, eligible_time / 28800 * 2))) * 1e6 + queue_priority * 1e3 + math.log2(sbu_rate + 1)'''
+        compiled = compile(formula, '<string>', 'eval')
+        max_jfv = 0.0
+        for job in bs:
+            t = set_sort_formula(job, compiled, qinfo)
+            if t > max_jfv:
+                max_jfv = t
+        # Finally, re-sort the list
+
+        def my_cmp(job):
+            base = 0.0 if job['job_state'] in 'HQTW' else -max_jfv
+            return base - job['jsf_value']
+        bs.sort(key=my_cmp)
+
+    userexit_post_statjob = stack_userexit(userexit_post_statjob,
+        my_post_statjob)
+
+    def set_sort_formula(info, comp, qinfo):
+        ''' Compute job sort formula value
+        
+        Args:
+            info = job info
+            comp = compiled job_sort_formula
+            qinfo = queue info (for queue priority)
+        Returns:
+            Value of jsf for job, also stored in job jsf_value 
+        '''
+        share = fsu.share_name_map[info['Account_Name']]
+        fairshare_factor = share.fs_factor
+        job_priority = int(info.get('Priority', 0))
+        t = info.get('eligible_time', '0')
+        eligible_time = nas_field_format.clocktosecs(t)
+        queue_priority = 0
+        qname = info.get('queue')
+        if qname:
+            t = qinfo.get(qname)
+            if t:
+                t = t.get('Priority')
+                if t:
+                    queue_priority = int(t)
+        sbu_rate = info['Resource_List.sbu_rate']
+        value = eval(comp, globals(), locals())
+        info['jsf_value'] = value
+        return value
+    globals()['set_sort_formula'] = set_sort_formula
+
+
+# vi:ts=4:sw=4:expandtab:syntax=python

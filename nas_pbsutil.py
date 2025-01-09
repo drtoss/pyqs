@@ -221,12 +221,16 @@ def load_userexits(prefix):
         pbs_exec = t
     if pbs_exec:
         path = os.path.join(pbs_exec, 'lib', 'site', '%s_userexits' % prefix)
+        if not os.path.exists(path):
+            # Try site directory where we were loaded from
+            t = os.path.split(__spec__.origin)
+            path = os.path.join(t[0], 'site', '%s_userexits' % prefix)
         try:
             sbuf = os.stat(path)
             # Be careful about what we load
             if sbuf:
                 if sbuf.st_uid == 0 or sbuf.st_uid == user:
-                    mode = stat.S_ISDIR(sbuf.st_mode)
+                    mode = stat.S_IMODE(sbuf.st_mode)
                     if (mode & (stat.S_IWGRP | stat.S_IWOTH)) == 0:
                         with open(path) as f:
                             code += f.read()
@@ -512,29 +516,29 @@ def bs_item_to_json(bs, lvl):
 # Utility functions copied from PTL's BatchUtils class
 
 
-def list_to_attrl(l):
+def list_to_attrl(li):
     """
     Convert a list to a PBS attribute list
 
-    :param l: List to be converted
-    :type l: List
+    :param li: List to be converted
+    :type li: List
     :returns: PBS attribute list
     """
-    return list_to_attropl(l, None)
+    return list_to_attropl(li, None)
 
 
-def list_to_attropl(l, op=ifl.SET):
+def list_to_attropl(li, op=ifl.SET):
     """
     Convert a list to a PBS attribute operation list
 
-    :param l: List to be converted
-    :type l: List
+    :param li: List to be converted
+    :type li: List
     :returns: PBS attribute operation list
     """
     head = None
     prev = None
 
-    for i in l:
+    for i in li:
         a = str_to_attropl(i, op)
         if prev is None:
             head = a

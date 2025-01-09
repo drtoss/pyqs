@@ -21,14 +21,10 @@ swig -python -I${repo}/src/include ${defs} ./pbs_ifl.i
 
 t=$(pbs_python --version)
 version=${t#pbs_version = }
-case ${t#pbs_version = } in
-	(20.*)	sfx="3.*" ;;
-	(19.*)	sfx="2.*" ;;
-esac
-sfx=3.6m
+pyinc=$(python3-config --includes)
 gcc -g -O0 -Wall -Wno-unused-variable -fPIC -shared \
 	-I ${repo}/src/include \
-	-I /usr/include/python${sfx} \
+	$pyinc \
 	-D PBS_VERSION='"'$version'"' \
 	${defs} \
 	-L ${PBS_EXEC}/lib \
