@@ -406,7 +406,7 @@ field list, it can be requested by using a field name of 'A_xyz', 'RE_xyz',
 The
 .I 'xyz'
 portion of the field name specifies the attribute or resource,
-and must be typed exactly as it appears in qstat -f output.
+and must be typed exactly as it appears in nas_qstat -f output.
 The 'A_' prefix indicates a job attribute; 'RL_' is for
 a quantity from the job 'Resource_List' attribute;
  'RE_' is for job estimated resources; and 'RU_' refers
@@ -442,6 +442,16 @@ To change how these fields are formatted, use the
 usual -W fmt_name= method, where the field name includes the prefix. E.g.,
 .B "-W fmt_A_Rerunable=maxw:5".
 .RE
+.TP
+.BI field_aliases= [+-]alias:field[,...]
+Provide aliases for specifying fields to add/exclude via the
+.B o=
+or
+.B oa=
+options.
+E.g., If a site admin wants "ngpus" to also refer to the GPUs
+field, they can use "field_aliases=ngpus:gpus" in the site-wide
+qstat_userexits file.
 .TP
 .BI oa= [+-]field_list
 Like

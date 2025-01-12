@@ -139,6 +139,29 @@ class NAS_field_format(object):
         errlist = []
         if W is None:
             W = []
+        # Generate list of field aliases
+        # -W field_aliases=alias:fld[,...]
+        aliases = dict()
+        for opt in W:
+            mo = re.match(r'field_aliases([+-]?)=([+-]?)(.*)', opt)
+            if not mo:
+                continue
+            plusminus = mo.group(1)
+            if plusminus == '':
+                plusminus = mo.group(2)
+            if plusminus == '':
+                aliases = dict()
+            pairs = mo.group(3).split(',')
+            for pair in pairs:
+                t = pair.split(':')
+                if len(t) != 2:
+                    continue
+                (alias, fld) = (x.strip() for x in t)
+                if plusminus == '-':
+                    if alias in aliases:
+                        del aliases[alias]
+                else:
+                    aliases[alias] = fld
         for opt in W:
             # Check for request to list fields
             if opt == tag + '=?':
@@ -153,6 +176,11 @@ class NAS_field_format(object):
             if plusminus == '':
                 plusminus = mo.group(2)
             names = mo.group(3).split(',')
+            # Resolve aliases
+            for i in range(len(names)):
+                name = names[i].strip()
+                if name in aliases:
+                    names[i] = aliases[name]
             if plusminus == '':
                 fl = [n.strip() for n in names]
             elif plusminus == '-':
