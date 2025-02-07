@@ -33,7 +33,7 @@ else:
         server_name = lcl['current_server'].split('.')[0]
         cfg = lcl['cfg']
         svr_hdr = lcl.get('in_server_header', False)
-        showgpu = server_name in ['pbspl4', 'server2']
+        showgpu = server_name in ['pbspl4', 'pbs05a']
         if svr_hdr:
             # Enable/disable all GPU fields in -a node output
             node_detail = lcl.get('node_detail', False)
