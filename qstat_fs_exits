@@ -57,7 +57,7 @@ if not args.B and not args.Q:
     import math
     globals()['math'] = math
     # Comment the following line to use default sources for data
-    #fsu.set_fs_info(None, gf='test_shares', uf='/PBS/sched_priv/usage')
+    fsu.set_fs_info(None, gf='test_shares2', uf='new_usage')
     result = fsu.load_fs_info(fsu.groups_file)
     if isinstance(result, str):
         print(f'Problem loading fs info: {result}', file=sys.stderr)

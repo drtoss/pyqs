@@ -529,6 +529,11 @@ def fmt_lifetime(fi, info):
 
 def fmt_mission(fi, info):
     global gshare_entity_info
+    # First, see if Account_Name has mission (put there by NAS hook)
+    entity = info.get('Account_Name', None)
+    if entity and not ':' in entity:
+        return entity
+    # Otherwise, look up egroup:euser in gshare_entity map
     entity = info.get('share_entity', None)
     if not entity:
         entity = info.get('egroup', '') + ':' + info.get('euser', '')
@@ -543,6 +548,8 @@ modelre = re.compile(r'^(\d+)?.*\bmodel=(\w+)')
 def fmt_model(fi, info):
     # Raw format: 4:ncpus=3:model=sky_gpu:bigmem=false
     rawv = fmt_by_attr(fi, info)
+    if rawv == '--':
+        rawv = fmt_by_name(fi, info, 'select')
     models = []
     for chunk in rawv.split('+'):
         mo = modelre.search(chunk)
@@ -691,7 +698,8 @@ def fmt_state_count(fi, info):
 def fmt_user(fi, info):
     '''Raw format: user@host, or just user'''
     rawv = fmt_by_attr(fi, info)
-    # If -W -r, return raw value
+    if rawv == '--':
+        return fmt_user_from_owner(fi, info)
     return rawv.split('@')[0]
 
 

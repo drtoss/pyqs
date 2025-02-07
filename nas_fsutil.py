@@ -324,7 +324,7 @@ def load_usage_from_jobs(fname, tree, patts, weights):
     for job in jobs:
         jobname = job['id']
         # Ignore jobs that finish without starting (e.g. qdeled)
-        if job.get('job_state') == 'F' and job.get['stime', None] is None:
+        if job.get('job_state') == 'F' and job.get('stime', None) is None:
             continue
         entity = set_account_name(job, patts)
         if entity not in share_name_map:

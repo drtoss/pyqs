@@ -136,7 +136,7 @@ gshare_entity_info = dict()
 host_re = None
 opts_W = list()
 verbose = 0
-version = "0.2"
+version = "0.3"
 
 conf.gNow = gNow
 conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
@@ -296,16 +296,6 @@ def main():
     fmtr = NAS_field_format(default_fields)
     fmtr.known_fields = known_fields
     userexit_add_fields(globals(), locals())
-    # NAS allows visibility to some fields that are restricted by default.
-    # Use alternate sources for the data when available.
-    if not gNAS and gID != 0:
-        #  Here, euser is not visible, so use Job_Owner as best substitute
-        try:
-            idx = [x['name'] for x in known_fields].index('user')
-            known_fields[idx]['func'] = 'fmt_user_from_owner'
-            known_fields[idx]['sources'] = ['Job_Owner']
-        except (KeyError, ValueError):
-            pass
     # Handle -W formatting options
     # First, collect list of fields of interest and which PBS attributes
     # hold the values for those fields
@@ -1323,8 +1313,9 @@ def gen_field_list():
     fl.append(gen_field('minwallt', ['Min', 'wallt'], rj, 'fmt_from_rsrc_tm',
                         'Resource_List', 'min_walltime'))
     fl.append(gen_field('mission', 'Mission', None, 'fmt_mission',
-                        'egroup euser Priority'))
-    fl.append(gen_field('model', 'Model', None, 'fmt_model', 'schedselect'))
+                        'egroup euser Priority Account_Name'))
+    fl.append(gen_field('model', 'Model', None, 'fmt_model',
+                        'schedselect Resource_List', 'select'))
     fl.append(gen_field('nds', 'Nds', rj, 'fmt_from_rsrc',
                         'resources_used Resource_List', 'nodect'))
     fl.append(gen_field('place', 'Place', None, 'fmt_by_name',
@@ -1349,7 +1340,7 @@ def gen_field_list():
     fl.append(gen_field('ss', 'Ss', None, 'fmt_jobstate',
                         'job_state Hold_Types'))
     fl.append(gen_field('stime', 'Stime', None, 'fmt_date', 'stime'))
-    fl.append(gen_field('user', 'User', None, 'fmt_by_attr', 'euser'))
+    fl.append(gen_field('user', 'User', None, 'fmt_user', 'euser Job_Owner'))
     fl.append(gen_field('vmem', 'Vmem', hlrj, 'fmt_from_rsrc_sz',
                         'resources_used', 'vmem'))
     return fl
