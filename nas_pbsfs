@@ -305,8 +305,11 @@ def set_paths(pbs_conf):
     hostname = pbs_conf.pbs_server_name
     shost = hostname.split('.')[0]
     sched_priv = os.path.join(pbs_home, 'sched_priv')
-    groups_file = os.path.join(sched_priv, 'resource_group')
-    usage_file = os.path.join(sched_priv, 'usage')
+    for sp in [os.path.join('/home1', 'pbs_status', shost), sched_priv]:
+        usage_file = os.path.join(sp, 'usage')
+        if os.path.exists(usage_file):
+            break
+    groups_file = os.path.join(os.path.dirname(usage_file), 'resource_group')
     fsu.set_fs_info(shost, gf=groups_file, uf=usage_file)
 
 

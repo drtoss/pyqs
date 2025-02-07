@@ -18,8 +18,8 @@ share_name_map = dict()
 share_id_map = dict()
 map_cache = dict()
 
-# XXX The following should be loaded from running system
-# See set_fs_info() for how to change at runtime
+# These defaults should be overridden by the caller.
+# See set_fs_info() for how to change them.
 fs_decay_time = 24 * 3600.0
 fs_decay_factor = 0.5
 unknown_alloc = 10
@@ -317,11 +317,15 @@ def load_usage_from_jobs(fname, tree, patts, weights):
     if fname != '-':
         fs.close()
     interesting = ['egroup', 'euser', 'resources_used', 'schedselect',
-                   'Account_Name', 'job_state', 'obittime', 'stime']
+                   'Account_Name', 'job_state', 'obittime', 'stime',
+                   'group_list']
     jobs = lines_to_stat(lines, interesting)
     del lines
     for job in jobs:
         jobname = job['id']
+        # Ignore jobs that finish without starting (e.g. qdeled)
+        if job.get('job_state') == 'F' and job.get['stime', None] is None:
+            continue
         entity = set_account_name(job, patts)
         if entity not in share_name_map:
             print(f'Unknown entity for job {jobname}', file=stderr)
@@ -838,7 +842,4 @@ def clocktosecs(v):
     return seconds + 60 * (minutes + 60 * (hours + 24 * days))
 
 
-if __name__ == '__main__':
-
-    sys.exit(main())
 # vi:ts=4:sw=4:expandtab

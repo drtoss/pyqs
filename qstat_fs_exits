@@ -47,7 +47,7 @@ if not args.B and not args.Q:
             'resources_used Resource_List schedselect')
         fmtr.known_fields.append(t)
         t = gen_field('jfv', ['Formula', 'value'], {'hj': 'r'}, 'fmt_jfv',
-            'resources_used egroup Account_Name eligible_time queue')
+            'resources_used euser egroup Account_Name eligible_time queue')
         fmtr.known_fields.append(t)
     userexit_add_fields = stack_userexit(userexit_add_fields, my_add_fields)
 
@@ -70,7 +70,6 @@ if not args.B and not args.Q:
 
     def my_post_statjob(g, lcl):
         # Need to get info about queues
-        # TODO for now, fetch from file
         sname = lcl['sname']
         gdebug = g['gdebug']
         qfile = check_W_str('queues')
@@ -80,7 +79,9 @@ if not args.B and not args.Q:
         qbs = file_to_stat(sname, 'queues')
         qinfo = dict()
         if not qbs:
-            print(f'Missing cache file for {sname} queues')
+            qbs = ifl.pbs_statque(lcl['conn'], '', None, None)
+        if not qbs:
+            print(f'No queue info for host: {sname}')
         else:
             for x in qbs:
                 qname = x['id']
@@ -91,7 +92,7 @@ if not args.B and not args.Q:
             jobname = job['id']
             sbu_rate = fsu.set_sbu_rate_nh(job, fs_weights)
             if isinstance(sbu_rate, str):
-                print(f'Cannot get sbu_rate for {jobname}')
+                print(f'Cannot get sbu_rate for {jobname}: {sbu_rate}')
                 job['Resource_List.sbu_rate'] = sbu_rate = 0.0
             entity = fsu.set_account_name(job, fs_patts)
             if not entity:
