@@ -14,7 +14,7 @@ else:
     if 'gpus' not in default_fields:
         try:
             t = default_fields.index('cpus')
-        except:
+        except ValueError:
             t = len(default_fields) - 1
         default_fields.insert(t+1, 'gpus')
 
@@ -38,8 +38,10 @@ else:
             # Enable/disable all GPU fields in -a node output
             node_detail = lcl.get('node_detail', False)
             cfg.change_fieldspec('gpus', suppress=not showgpu or node_detail)
-            cfg.change_fieldspec('gused', suppress=not showgpu or not node_detail)
-            cfg.change_fieldspec('gfree', suppress=not showgpu or not node_detail)
+            cfg.change_fieldspec('gused', suppress=not showgpu or
+                                 not node_detail)
+            cfg.change_fieldspec('gfree', suppress=not showgpu or
+                                 not node_detail)
         else:
             # Enable/disable job GPU column
             cfg.change_fieldspec('gpus', suppress=not showgpu)

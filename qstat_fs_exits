@@ -44,7 +44,7 @@ if not args.B and not args.Q:
         setattr(nas_field_format, 'fmt_jfv', fmt_jfv)
         fmtr = lcl.get('fmtr')
         t = gen_field('sbu_rate', 'SBU_rate', {'hj': 'r'}, 'fmt_sbu_rate',
-            'resources_used Resource_List schedselect')
+                      'resources_used Resource_List schedselect')
         fmtr.known_fields.append(t)
         t = gen_field('jfv', ['Formula', 'value'], {'hj': 'r'}, 'fmt_jfv',
             'resources_used euser egroup Account_Name eligible_time queue')
@@ -57,7 +57,7 @@ if not args.B and not args.Q:
     import math
     globals()['math'] = math
     # Comment the following line to use default sources for data
-    fsu.set_fs_info(None, gf='test_shares2', uf='new_usage')
+    # fsu.set_fs_info(None, gf='test_shares2', uf='new_usage', ua=0.0)
     result = fsu.load_fs_info(fsu.groups_file)
     if isinstance(result, str):
         print(f'Problem loading fs info: {result}', file=sys.stderr)
@@ -86,7 +86,7 @@ if not args.B and not args.Q:
             for x in qbs:
                 qname = x['id']
                 qinfo[qname] = x
-        fsu.set_fs_info(None, fm=True)
+        fsu.set_fs_info(None, tj=True)
         bs = lcl['bs']
         for job in bs:
             jobname = job['id']
@@ -123,17 +123,17 @@ if not args.B and not args.Q:
         bs.sort(key=my_cmp)
 
     userexit_post_statjob = stack_userexit(userexit_post_statjob,
-        my_post_statjob)
+                                           my_post_statjob)
 
     def set_sort_formula(info, comp, qinfo):
         ''' Compute job sort formula value
-        
+
         Args:
             info = job info
             comp = compiled job_sort_formula
             qinfo = queue info (for queue priority)
         Returns:
-            Value of jsf for job, also stored in job jsf_value 
+            Value of jsf for job, also stored in job jsf_value
         '''
         share = fsu.share_name_map[info['Account_Name']]
         fairshare_factor = share.fs_factor
