@@ -198,6 +198,15 @@ class NAS_field_format(object):
         requested = set(fl)
         unknowns = requested.difference(knowns)
         if unknowns:
+            # Check if just a wrong case problem
+            for i in range(len(fl)):
+                name = fl[i]
+                if name in knowns:
+                    continue
+                if name.lower() in knowns:
+                    fl[i] = name.lower()
+                    unknowns.remove(name)
+        if unknowns:
             plural = 's' if len(unknowns) > 1 else ''
             errlist.append("Unknown field name%s: %s" %
                            (plural, ', '.join(sorted(unknowns))))
@@ -531,7 +540,7 @@ def fmt_mission(fi, info):
     global gshare_entity_info
     # First, see if Account_Name has mission (put there by NAS hook)
     entity = info.get('Account_Name', None)
-    if entity and not ':' in entity:
+    if entity and ':' not in entity:
         return entity
     # Otherwise, look up egroup:euser in gshare_entity map
     entity = info.get('share_entity', None)

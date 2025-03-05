@@ -45,11 +45,12 @@ if True:
 long_desc = __doc__
 gdebug = ''
 version = "0.2"
+opts_W = list()
 
 
 def main():
     global args, version, gdebug, shost, hostname, pbs_exec, pbs_home
-    global sched_priv, groups_file, usage_file
+    global sched_priv, groups_file, usage_file, opts_W
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, signal.NSIG):
         try:
@@ -75,10 +76,14 @@ def main():
                         help="path to scheduler's list of resource groups")
     parser.add_argument('--job_file', action='store',
                         help='output from nas_qstat -xf for -c usage info')
+    parser.add_argument('-k', action='store',
+                        help='share attribute to sort on')
     parser.add_argument('--new_usage', action='store', default='new_usage',
                         help='where to write -c usage info')
     parser.add_argument('--usage', action='store',
                         help='path to input usage file')
+    parser.add_argument('--ua', '--unknown_alloc', default=None,
+                        help='share allocation for unknown entities')
     parser.add_argument('--verbose', '-v', default=0, action='count',
                         help='increase debugging verbosity')
     parser.add_argument('--version', action='version',
@@ -103,6 +108,8 @@ def main():
     if args.usage:
         usage_file = args.usage
     fsu.set_fs_info(None, gf=groups_file, uf=usage_file)
+    if args.ua:
+        fsu.set_fs_info(None, ua=float(args.ua))
     if args.convert:
         if not args.job_file:
             print('convert option requires --job_file', file=stderr)
@@ -222,8 +229,34 @@ def display_standard(root, fmtr):
         if not title:
             title = fld['name']
         c.add_field(title, ident=fld['name'], **fld['format'])
+    aname = 'name'
+    reverse = False
+    key = args.k
+    t = check_W_str('k', None)
+    if t:
+        key = t
+    if key:
+        # Usually want to sort high to low
+        reverse = True
+        if key.startswith('+'):
+            reverse = False
+            aname = key[1:]
+        else:
+            aname = key
+        if aname not in root.__dict__:
+            if aname == '?':
+                print('Known share table fields are:',
+                      ' '.join(root.__dict__.keys()))
+                sys.exit(0)
+            print(f'Unknown share attrbute: {aname}', file=stderr)
+            exit(1)
     rows = list()
-    for share in fsu.depth_first(root, 0) if args.t else share_id_map.values():
+    if args.t:
+        slist = fsu.depth_first_attr(root, aname, 0, reverse)
+    else:
+        slist = sorted(share_id_map.values(), key=lambda x: getattr(x, aname),
+                       reverse=reverse)
+    for share in slist:
         row = list()
         for f in fmtr.field_list:
             func = globals().get(f['func'], None)
@@ -295,6 +328,23 @@ def fmt_fs_usage(fi, info):
     '''Format a share usage'''
     usage = info.usage
     return "%.3f" % (usage / 3600.0)
+
+
+def check_W_str(name, default=''):
+    global opts_W
+    namee = name + '='
+    # Last match decides, so search backward
+    for idx in range(len(opts_W) - 1, -1, -1):
+        wopt = opts_W[idx]
+        # Option by itself is default
+        if wopt == name:
+            return default
+        # Examine name=value
+        if not wopt.startswith(namee):
+            continue
+        val = wopt[len(namee):]
+        return val
+    return default
 
 
 def set_paths(pbs_conf):

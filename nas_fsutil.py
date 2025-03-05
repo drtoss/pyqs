@@ -52,8 +52,7 @@ class Share:
         #                             also called fairshare_tree_usage
         self.grp_path = list()      # path from root to node
         self.parent = None          # link up the tree
-        self.sibling = None         # chain of nodes with same parent as us
-        self.child = None           # link to head of our sibling chain
+        self.children = list()      # children of this node
         self.fs_factor = 0.0
         self.depth = 0              # indent to print in tree form
 
@@ -77,23 +76,25 @@ def set_fs_info(hn, **kwds):
     for (key, value) in kwds.items():
         if key == 'df':
             fs_decay_factor = value
-        if key == 'dt':
+        elif key == 'dt':
             fs_decay_time = value
-        if key == 'gf':
+        elif key == 'gf':
             groups_file = value
-        if key == 'tj':
+        elif key == 'tj':
             trust_job_info = value
-        if key == 'ua':
+        elif key == 'ua':
             unknown_alloc = value
-        if key == 'uf':
+        elif key == 'uf':
             usage_file = value
-        if key == 'rs':
+        elif key == 'rs':
             share_name_map.clear()
             share_id_map.clear()
             map_cache.clear()
             trust_job_info = False
             gnow = time.time()
             asof_time = gnow
+        else:
+            print(f'Unknown parameter to set_fs_info: {key}', file=stderr)
     do_debugging()
     return
 
@@ -148,58 +149,51 @@ def calc_fs_tree_usage(tree):
     '''
     if not tree:
         return
-    share = tree.child
-    while share:
-        usage = 1.0 if tree.usage == 0.0 else tree.usage
-        share.usage_factor = share.usage / usage
-        calc_fs_tree_usage_helper(tree, share.child)
-        share = share.sibling
+    root_usage = 1.0 if tree.usage == 0.0 else tree.usage
+    for share in tree.children:
+        share.usage_factor = share.usage / root_usage
+        calc_fs_tree_usage_helper(root_usage, share)
 
 
-def calc_fs_tree_usage_helper(root, child):
-    '''Helper routine to recurse through tree at root
+def calc_fs_tree_usage_helper(root_usage, child):
+    '''Helper routine to recurse through subtree
 
     Args:
-        root = base of tree to work on
+        root_usage = total usage in tree
         child = a node in the tree to start with
     '''
-    if not root or not child:
+    if not child:
         return
     parent = child.parent
     if not parent:
         return
-    if root.usage == 0.0:
-        portion = 0.0
-    else:
-        portion = child.usage / root.usage
+    portion = child.usage / root_usage
     child.usage_factor = portion + \
         (parent.usage_factor - portion) * child.grp_pct
-    calc_fs_tree_usage_helper(root, child.sibling)
-    calc_fs_tree_usage_helper(root, child.child)
+    for share in child.children:
+        calc_fs_tree_usage_helper(root_usage, share)
 
 
-def calc_fs_percent(root, alloc):
+def calc_fs_percent(share):
     '''Calc group share percent of total
 
     Args:
-        root = base of subtree
-        alloc = allocation for the group
-            UNSPECIFIED implies calculate it
+        share = base of subtree
     '''
 
-    if not root or not root.parent:
+    if not share or not share.parent:
         return
-    cur_alloc = alloc if alloc != UNSPECIFIED else count_alloc(root)
-    parent = root.parent
+    parent = share.parent
+    grp_alloc = count_alloc(parent)
     # Detect no alloc
-    if cur_alloc * parent.tree_pct == 0:
-        root.grp_pct = 0.0
-        root.tree_pct = 0.0
+    if grp_alloc * parent.tree_pct == 0:
+        share.grp_pct = 0.0
+        share.tree_pct = 0.0
     else:
-        root.grp_pct = float(root.alloc) / cur_alloc
-        root.tree_pct = root.grp_pct * parent.tree_pct
-    calc_fs_percent(root.sibling, cur_alloc)
-    calc_fs_percent(root.child, UNSPECIFIED)
+        share.grp_pct = float(share.alloc) / grp_alloc
+        share.tree_pct = share.grp_pct * parent.tree_pct
+    for child in share.children:
+        calc_fs_percent(child)
 
 
 def count_alloc(share):
@@ -212,11 +206,7 @@ def count_alloc(share):
     Returns:
         sum of the allocations for the sib list
     '''
-    tot_alloc = 0
-    while share:
-        if share.alloc:
-            tot_alloc += share.alloc
-        share = share.sibling
+    tot_alloc = sum([x.alloc for x in share.children])
     return tot_alloc
 
 
@@ -232,11 +222,31 @@ def depth_first(tree, depth):
     if not tree:
         return []
     tree.depth = depth
-    clist = depth_first(tree.child, depth+1)
-    slist = depth_first(tree.sibling, depth)
     t = [tree]
-    t += clist
-    t += slist
+    for child in tree.children:
+        t.extend(depth_first(child, depth+1))
+    return t
+
+
+def depth_first_attr(tree, attr, depth, rev=False):
+    '''Visit tree in depth first order sorted on attr
+
+    Args:
+        tree to visit
+            nodes will have their depth value updated
+        attr = name of attribute to sort on
+        depth = current depth
+        rev = sort high to low
+    Returns:
+        Tree nodes, depth first, sorted on attr
+    '''
+    if not tree:
+        return []
+    tree.depth = depth
+    t = [tree]
+    chlds = sorted(tree.children, key=lambda x: getattr(x, attr), reverse=rev)
+    for child in chlds:
+        t.extend(depth_first_attr(child, attr, depth+1, rev))
     return t
 
 
@@ -250,26 +260,14 @@ def insert_child(parent, child):
         child = child to add
     '''
     name = child.name
-    cur_child = parent.child
-    # Deal with first child
-    if not cur_child:
-        child.sibling = None
-        parent.child = child
-        return
-    # If new child fits in at beginning
-    if name < cur_child.name:
-        child.sibling = cur_child
-        parent.child = child
-        return
-    # Scan sib chain to find where to insert
-    while cur_child:
-        if name > cur_child.name:
-            prev = cur_child
-            cur_child = cur_child.sibling
-            continue
-        break
-    child.sibling = cur_child
-    prev.sibling = child
+    children = parent.children
+    # Find out where child fits in current children list
+    for i in range(len(children)):
+        if name < children[i].name:
+            children.insert(i, child)
+            break
+    else:
+        children.append(child)
     return
 
 
@@ -464,7 +462,9 @@ def set_sbu_rate_nh(job, weights):
     '''
     rate = job.get('Resource_List.sbu_rate')
     if rate and trust_job_info:
-        return float(rate)
+        rate = float(rate)
+        job['Resource_List.sbu_rate'] = rate
+        return rate
     select = job.get('schedselect')
     if not select:
         select = job.get('Resource_List.select')
@@ -574,7 +574,7 @@ def reconcile_tree(root):
         True if no problems found
         False if errors reported.
     '''
-    # First, build parent, child, and sibling links
+    # First, build parent and child links
     for (name, share) in share_name_map.items():
         par_id = share.par_id
         if par_id < 0:
@@ -589,19 +589,19 @@ def reconcile_tree(root):
     # Fill in special shares: root and unknown
     root = share_name_map[FAIRSHARE_ROOT_NAME]
     root.tree_pct = 1.0
-    root.alloc = 0
-    tot_alloc = sum([share.alloc for share in share_id_map.values()])
-    root.alloc = tot_alloc
+    # Compute total alloc of root's children
+    root.alloc = sum([share.alloc for share in root.children])
     unk = share_name_map[UNKNOWN_GROUP_NAME]
     unk.alloc = unknown_alloc
-    calc_fs_percent(root.child, UNSPECIFIED)
+    for child in root.children:
+        calc_fs_percent(child)
     return True
 
 
 def reconcile_usage(root):
     # Add current use values for leaf nodes into their ancesters
     for share in share_id_map.values():
-        if share.child:
+        if share.children:
             continue    # Not leaf
         usage = share.usage
         for name in share.grp_path:
@@ -716,7 +716,7 @@ def build_patterns(fname, plines, entities):
             return f'Invalid pattern line {loc}'
         (patt, entity) = flds
         if entity not in entities:
-            return 'Unknown entity name {entity} {loc}'
+            return f'Unknown entity name {entity} {loc}'
         try:
             t = re.compile(patt + '$')
         except Exception:
