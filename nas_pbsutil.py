@@ -220,7 +220,8 @@ def load_userexits(prefix):
     if t:
         pbs_exec = t
     if pbs_exec:
-        path = os.path.join(pbs_exec, 'lib', 'site', '%s_userexits' % prefix)
+        path = os.path.join(pbs_exec, 'unsupported', 'lib', 'site',
+                            '%s_userexits' % prefix)
         if not os.path.exists(path):
             # Try site directory where we were loaded from
             t = os.path.split(__spec__.origin)
