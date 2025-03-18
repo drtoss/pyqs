@@ -74,7 +74,7 @@ if not args.B and not args.Q:
         gdebug = g['gdebug']
         qfile = check_W_str('queues')
         if qfile:
-            t = ' fake_%s_%s=%s' % ('queues', sname, qfile)
+            t = ' cache_%s_%s=%s' % ('queues', sname, qfile)
             gdebug += t
         qbs = file_to_stat(sname, 'queues')
         qinfo = dict()

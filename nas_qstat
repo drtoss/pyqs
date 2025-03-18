@@ -233,7 +233,7 @@ def main():
         return 1
 
     # Set our idea of current time, if requested.
-    mo = re.search(r'fake_time=(\d+)', gdebug)
+    mo = re.search(r'cache_time=(\d+)', gdebug)
     if mo:
         try:
             gNow = int(mo.group(1))

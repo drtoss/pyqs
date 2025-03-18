@@ -116,7 +116,7 @@ def parse_jobid(job_id):
 
 
 def file_to_stat(host, stat, attrs=[]):
-    '''Load faked PBS statXXX results from file
+    '''Load cache PBS statXXX results from file
 
     That is, check if one of the --debug arguments specified a file
     to use in place of an actual pbs_statxyz call. Load the file
@@ -126,15 +126,15 @@ def file_to_stat(host, stat, attrs=[]):
     to look like the result from a pbs_statvnodes() call.
 
     Args:
-        host = Hostname of faked data of interest
+        host = Hostname of data of interest
         stat = Which kind of info is being queried (e.g., jobs)
         attrs = List of interesting attribute names. Can also
             be the attropl that would be passed to the pbs_xyz call.
     Returns:
-        None if there isn't any appropriate fake file specified.
+        None if there isn't any appropriate cache file specified.
         Else a dictionary with the attributes and values.
     '''
-    mo = re.search(r'fake_%s_%s=([^\s]+)' % (stat, host), conf.gdebug)
+    mo = re.search(r'cache_%s_%s=([^\s]+)' % (stat, host), conf.gdebug)
     if not mo:
         return None
     fname = mo.group(1)

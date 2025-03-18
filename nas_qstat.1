@@ -675,7 +675,7 @@ command line option is used by developers. As such, it is subject to
 change.
 Currently recognized options include:
 .TP
-\fBfake_\fIstat\fP_\fIhost\fP=\fIpath\fP
+\fBcache_\fIstat\fP_\fIhost\fP=\fIpath\fP
 .B nas_qstat
 normally queries PBS servers for information. However,
 during development, it is useful to have a constant set of data to
@@ -683,38 +683,40 @@ work with, or data from servers that are not available to the
 developers.
 So,
 .B nas_qstat
-supports supplying data from text files instead of
+supports supplying data from cached text files instead of
 from a server. The name of the debug option gives the pbs_statxxx
-call to be faked and for which server.
+call to be redirected and for which server.
 .RS
 .TP
-.BI fake_jobs_ host
+.BI cache_jobs_ host
 Supplies the file with
 .B "qstat\ -f"
 information for server
 .IR host .
 .TP
-.BI fake_server_ host
+.BI cache_server_ host
 Supplies the file with
 .B "qstat\ -Bf"
 information for server
 .IR host .
 .TP
-.BI fake_vnodes_ host
+.BI cache_vnodes_ host
 Supplies the file with
 .B "pbsnodes\ -av"
 information for server
 .IR host .
 .TP
-.BI fake_resvs_ host
+.BI cache_resvs_ host
 Supplies the file with
 .B "pbs_rstat\ -f"
 information for server
 .IR host .
 .RE
+.sp
 Thus,
-.B "--debug=fake_jobs_pbspl4=faked_jobs.txt"
-says to read jobs status information for server pbspl4 from the file faked_jobs.txt.
+.B "--debug=cache_jobs_pbspl4=cached_jobs.txt"
+says to read jobs status information for server pbspl4 from the file
+cached_jobs.txt.
 .sp
 .SH SEE ALSO
 nas_qstat_userexits(3)
