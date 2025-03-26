@@ -113,6 +113,7 @@ if check_perms():
     import signal
     import socket
     import time
+    from math import *
 
     import pbs_ifl as ifl
     from nas_pbsutil import *
@@ -126,6 +127,7 @@ args = None
 gNAS = False
 gNAS_job_data = {}
 gNow = time.time()
+gAltairFS = False
 gdebug = []
 ghostname = ''
 ghostnameshort = ''
@@ -156,6 +158,7 @@ if '-ee' in sys.argv:
 def main():
     global gNAS, verbose, args, opts_W, host_re, gdebug
     global ghostname, ghostnameshort
+    global gAltairFS
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, signal.NSIG):
         try:
@@ -316,6 +319,38 @@ def main():
         return 1
     # Set formatting globals from cmd line args
     nas_field_format.set_field_vars(opts_W)
+    # See if will need Altair fairshare stuff
+    t = [x['name'] for x in field_list]
+    if 'jsfv' in t or 'sbu_rate' in t:
+        gAltairFS = True
+        import nas_fsutil as fsu
+        globals()['fsu'] = fsu
+        if gNAS:
+            # At NAS, some file are in non-standard locations
+            t = os.path.join(pbs_conf.pbs_home_path, 'sched_priv', 'usage')
+            if not os.path.exists(t):
+                fsu.set_fs_info(None, sp='/PBS/current/pbs_home')
+        # Possibly override some file locations from -W options
+        for (short, long) in (('sp', 'sched_priv'), ('ff', 'formula_file'),
+                              ('gf', 'groups_file'), ('sf', 'shares_file'),
+                              ('uf', 'usage_file')
+                              ):
+            value = check_W_str(short)
+            if not value:
+                value = check_W_str(long)
+            if value:
+                fsu.set_fs_info(None, [short, value])
+        # Assume job info is good
+        fsu.set_fs_info(None, tj=True)
+        result = fsu.load_fs_info(fsu.groups_file)
+        if isinstance(result, str):
+            print(f'Problem loading fairshare info: {result}', file=sys.stderr)
+            sys.exit(1)
+        (fs_tree, fs_patts, fs_weights) = result
+        globals()['fs_tree'] = fs_tree
+        globals()['fs_patts'] = fs_patts
+        globals()['fs_weights'] = fs_weights
+        fsu.load_usage(fs_tree)
     # Decide if will be filtering based on execution host
     host_patt = check_W_str('host')
     if host_patt is None:
@@ -544,6 +579,8 @@ def display_jobs(args, fmtr):
                 continue
         if gNAS:
             plug_job_info(bs)
+        if gAltairFS:
+            plug_fs_info(bs, sname, conn)
         # Give userexits a chance to tweak info for jobs
         userexit_post_statjob(globals(), locals())
         if gNAS and check_W_int('shares', 0):
@@ -1302,6 +1339,9 @@ def gen_field_list():
     fl.append(gen_field('gpus', 'GPUs', rj, 'fmt_from_rsrc',
                         'Resource_List', 'ngpus'))
     fl.append(gen_field('group', 'Group', None, 'fmt_by_attr', 'egroup'))
+    fl.append(gen_field('jsfv', ['Formula', 'value'], hlrj, 'fmt_jsfv',
+                        'resources_used Resource_List euser egroup '
+                        'Account_Name eligible_time queue'))
     fl.append(gen_field('jobid', 'JobID', None, 'fmt_jobid', None))
     fl.append(gen_field('jobname', 'Jobname', None, 'fmt_by_attr', 'Job_Name'))
     fl.append(gen_field('lifetime', ['Life', 'time'], rj, 'fmt_lifetime',
@@ -1335,6 +1375,8 @@ def gen_field_list():
                         'fmt_from_rsrc_tm', 'Resource_List', 'walltime'))
     fl.append(gen_field('runs', 'Runs', rj, 'fmt_by_attr', 'run_count'))
     fl.append(gen_field('s', 'S', None, 'fmt_by_attr', 'job_state'))
+    fl.append(gen_field('sbu_rate', 'SBU_rate', hlrj, 'fmt_sbu_rate',
+                        'resources_used Resource_List schedselect'))
     fl.append(gen_field('sessid', 'SessID', rj, 'fmt_by_attr', 'session_id'))
     fl.append(gen_field('seqno', 'SeqNo', None, 'fmt_seqno', None))
     fl.append(gen_field('ss', 'Ss', None, 'fmt_jobstate',
@@ -1850,6 +1892,110 @@ def new_section():
     if new_section_called:
         print()
     new_section_called = True
+
+
+def plug_fs_info(bs, sname, conn):
+    '''Add Altair fairshare info to job info
+
+    Args:
+        bs = batch status from call to pbs_statjob, etc
+        sname = short host name from statjob
+        conn = connection to sname
+    Exit:
+        bs updated
+    '''
+    global opts_W
+    for share in fsu.share_name_map.values():
+        if share.usage == 0.0:
+            share.usage = 1.0
+    fsu.reconcile_usage(fs_tree)
+
+    # Get job sort formula
+    if fsu.formula_file is not None:
+        with open(fsu.formula_file) as fs:
+            formula = fs.read()
+    else:
+        sbs = ifl.pbs_statserver(conn, None, None)
+        if sbs:
+            formula = sbs[0].get('job_sort_formula')
+    if formula == '':
+        formula = '0'
+    compiled = compile(formula, '<string>', 'eval')
+
+    qbs = file_to_stat(sname, 'queues')
+    qinfo = dict()
+    if not qbs:
+        qbs = ifl.pbs_statque(conn, '', None, None)
+    if not qbs:
+        print(f'No queue info for host {sname}', file=sys.stderr)
+    else:
+        for x in qbs:
+            qname = x['id']
+            qinfo[qname] = x
+    max_jsfv = 0.0
+    for job in bs:
+        jobname = job['id']
+        sbu_rate = fsu.set_sbu_rate_nh(job, fs_weights)
+        if isinstance(sbu_rate, str):
+            print(f'Cannot get sbu_rate for {jobname}: {sbu_rate}')
+            job['Resource_List.sbu_rate'] = sbu_rate = 0.0
+        entity = fsu.set_account_name(job, fs_patts)
+        if not entity:
+            print(f'Cannot get fairshare entity for {jobname}',
+                  file=sys.stderr)
+            entity = fsu.UNKNOWN_GROUP_NAME
+        job['entity'] = entity
+        # Now that we have share factors, evaluate job_sort_formula
+        t = set_sort_formula(job, compiled, qinfo)
+        if t > max_jsfv:
+            max_jsfv = t
+    # Now, re-sort job list based on job_sort_formula values
+
+    def my_cmp(job):
+        base = 0.0 if job['job_state'] in 'HQTW' else -max_jsfv
+        return base - job['jsf_value']
+    bs.sort(key=my_cmp)
+    # Disable normal sort
+    opts_W.insert(0, 'do_sort=f')
+
+
+def set_sort_formula(info, comp, qinfo):
+    '''Compute job sort formula value
+
+    Args:
+        info = job info
+        comp = compile job_sort_formula
+        qinfo = dict with queue information
+    Returns:
+        Value of jsf for job, also stored in job jsf_value
+    Note that we need to be careful about what variables are available
+    to the formula, so we del them.
+    '''
+    share = fsu.share_name_map[info['entity']]
+    fairshare_factor = share.fs_factor
+    job_priority = int(info.get('Priority', 0))
+    t = info.get('eligible_time', '0')
+    eligible_time = nas_field_format.clocktosecs(t)
+    t = info.get('walltime', '0')
+    walltime = nas_field_format.clocktosecs(t)
+    queue_priority = 0
+    qname = info.get('queue')
+    if qname:
+        t = qinfo.get(qname)
+        if t:
+            t = t.get('Priority')
+            if t:
+                queue_priority = int(t)
+    del qname
+    lcls = locals().copy()
+    rl = [x for x in info if x.startswith('Resource_List.')]
+    for x in rl:
+        key = x.split('.')[1]
+        lcls[key] = info[x]
+    del lcls['t'], lcls['info'], lcls['qinfo'], lcls['share']
+    value = eval(comp, globals(), lcls)
+    info['jsf_value'] = value
+    return value
 
 
 def plug_job_info(bs):

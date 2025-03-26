@@ -118,10 +118,6 @@ def main():
     default_fields = ['name', 'par_id', 'grp_id', 'alloc', 'pct',
                       'usage', 'ftu', 'fsfact']
     conf.verbose = args.verbose
-    levels = 0
-    if (levels > 1):
-        print("Use only one of TODO B, F, S, f", file=sys.stderr)
-        return 1
     # Build list of known fields
     opts_W = args.W
     if opts_W is None:
@@ -217,7 +213,6 @@ def display_g(args, root):
 
 def display_standard(root, fmtr):
     '''Output info in standard format
-    TODO
     Args:
         root = tree of info for share groups
         fmtr = field formatter object

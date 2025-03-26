@@ -272,7 +272,7 @@ def set_field_vars(opts):
     # gszunits = units for display of sizes
     gszunits = 'G' if 'G' in opts else 'M' if 'M' in opts else 'b'
     # ghuman = True to use human readable
-    ghuman = check_W_bool('human') or gszunits != 'b'
+    conf.ghuman = ghuman = check_W_bool('human') or gszunits != 'b'
     # gnow = current epoch time
     gnow = conf.gNow
 
@@ -498,6 +498,14 @@ def fmt_id(fi, info):
     return rawv.split('.')[0]
 
 
+def fmt_jsfv(fi, info):
+    # job sort formula value
+    rval = info.get('jsf_value')
+    if rval is not None:
+        return "%.1f" % rval
+    return '--'
+
+
 def fmt_jobid(fi, info):
     rawv = info['id']
     t = rawv.split('.')
@@ -663,6 +671,15 @@ def fmt_resv_states(fi, info):
     else:
         sst = rawv
     return st + '/' + sst
+
+
+def fmt_sbu_rate(fi, info):
+    # sbu_rate
+    rate = info.get('Resource_List.sbu_rate')
+    if rate is not None:
+        rate = float(rate)
+        return "%0.2f" % rate
+    return '--'
 
 
 def fmt_seqno(fi, info):

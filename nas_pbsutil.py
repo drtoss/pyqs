@@ -134,7 +134,7 @@ def file_to_stat(host, stat, attrs=[]):
         None if there isn't any appropriate cache file specified.
         Else a dictionary with the attributes and values.
     '''
-    mo = re.search(r'cache_%s_%s=([^\s]+)' % (stat, host), conf.gdebug)
+    mo = re.search(r'cache_%s_%s=([^\s]+)' % (host, stat), conf.gdebug)
     if not mo:
         return None
     fname = mo.group(1)
@@ -468,6 +468,7 @@ def bs_item_to_json(bs, lvl):
              None on error.
     '''
     global gEncoder
+    human = conf.ghuman
     if not bs:
         return None
     if gEncoder is None:
@@ -506,6 +507,9 @@ def bs_item_to_json(bs, lvl):
             cur_resclist[resc] = value
             continue
         # Normal entry
+        if attr in time_attrs and human:
+            value = time.strftime('%a %b %e %H:%M:%S %Y',
+                                  time.localtime(int(value)))
         json_data[attr] = value
     # Handle falling off the end of a resource list
     if cur_attrname:

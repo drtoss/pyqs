@@ -24,7 +24,10 @@ fs_decay_time = 24 * 3600.0
 fs_decay_factor = 0.5
 unknown_alloc = 10
 sched_priv = '/var/spool/pbs/sched_priv'
+sched_config = os.path.join(sched_priv, 'sched_config')
+formula_file = None
 groups_file = os.path.join(sched_priv, 'resource_group')
+nas_shares_file = os.path.join(sched_priv, 'shares')
 usage_file = os.path.join(sched_priv, 'usage')
 shost = 'localhost'
 
@@ -57,29 +60,49 @@ class Share:
         self.depth = 0              # indent to print in tree form
 
 
-def set_fs_info(hn, **kwds):
+def set_fs_info(hn, *lst, **kwds):
     '''Set global values for other routines
 
     Args:
         hn = hostname
         df = fs_decay_factor (float)
         dt = fs_decay_time (seconds)
+        ff = job sort formula file
         gf = groups_file (resource_groups) path
         rs = reset global maps
+        sf = NAS shares file
+        sp = sched_priv directory
         ua = unknown_alloc (float)
         uf = usage_file path
     '''
     global shost, fs_decay_factor, fs_decay_time, groups_file, unknown_alloc
-    global usage_file, trust_job_info, gnow, asof_time
+    global usage_file, trust_job_info, gnow, asof_time, nas_shares_file
+    global sched_priv, sched_config, formula_file
     if hn:
         shost = hn.split('.')[0]
-    for (key, value) in kwds.items():
+    args = dict(lst)
+    if kwds:
+        args.update(kwds)
+    for (key, value) in args.items():
         if key == 'df':
             fs_decay_factor = value
         elif key == 'dt':
             fs_decay_time = value
+        elif key == 'ff':
+            formula_file = value
         elif key == 'gf':
             groups_file = value
+        elif key == 'sc':
+            sched_config = value
+        elif key == 'sp':
+            # When sched_priv directory changes, point other files there
+            sched_priv = value
+            sched_config = os.path.join(sched_priv, 'sched_config')
+            groups_file = os.path.join(sched_priv, 'resource_group')
+            nas_shares_file = os.path.join(sched_priv, 'shares')
+            usage_file = os.path.join(sched_priv, 'usage')
+        elif key == 'sf':
+            nas_shares_file = value
         elif key == 'tj':
             trust_job_info = value
         elif key == 'ua':
@@ -411,6 +434,8 @@ def set_account_name(job, patts, requestor=None):
     '''
     entity = job.get('Account_Name')
     if entity and trust_job_info:
+        if entity not in share_name_map:
+            entity = UNKNOWN_GROUP_NAME
         return entity
     euser = job.get('euser')
     if euser is None:
@@ -621,11 +646,12 @@ def create_group_path(share):
     return path
 
 
-def load_fs_info(fname):
-    '''Read and parse fairshare info file
+def load_fs_info(fname, sname=None):
+    '''Read and parse fairshare info file(s)
 
     Args:
-        fname = path to file to load from
+        fname = path to file to load groups from
+        sname = if given, path to load patterns and weights from
     Returns:
         Tuple (tree, pattern, weights) where
             tree is tree of entity Shares
@@ -640,7 +666,14 @@ def load_fs_info(fname):
             buf = fs.read()
     except OSError:
         return f'Cannot read {fname}'
-    (nlines, plines, wlines) = split_share_info(fname, buf)
+    buf2 = None
+    if sname:
+        try:
+            with open(sname) as fs:
+                buf2 = fs.read()
+        except OSError:
+            return f'Cannot read {sname}'
+    (nlines, plines, wlines) = split_share_info(fname, buf, sname, buf2)
     # We need the share tree to validate the patterns, so process it first
     tree = build_tree(fname, nlines)
     if isinstance(tree, str):
@@ -755,7 +788,7 @@ def build_weights(fname, wlines):
     return weights
 
 
-def split_share_info(fname, buf):
+def split_share_info(fname, buf, sname, buf2):
     '''Split the text of a shares file into its pieces.
 
     Examine each line to decide which type it is.
@@ -764,6 +797,8 @@ def split_share_info(fname, buf):
     Args:
         fname = name of source file (for error messages)
         buf = contents of file
+        sname = name of NAS shares file (for error messages)
+        buf2 = contents of file
     Returns:
         tuple of lists (nodes, patterns, weights)
             where each is a list of tuples (lineno, line)
@@ -791,6 +826,24 @@ def split_share_info(fname, buf):
             weights.append((lineno, flds[1:]))
             continue
         nodes.append((lineno, flds))
+    # Repeat with info from NAS shares file
+    lineno = 0
+    if buf2 is None:
+        buf2 = ''
+    for line in buf2.splitlines():
+        lineno += 1
+        # Truncate line at comments
+        line = line.partition('#')[0].strip()
+        flds = line.split()
+        if line == '':
+            continue
+        if flds[0] == 'type':
+            weights.append((lineno, flds[2:]))
+            continue
+        if len(flds) == 2:
+            patterns.append((lineno, flds))
+            continue
+        print(f'Unknown line time in {sname} at {lineno}', file=sys.stderr)
     return (nodes, patterns, weights)
 
 

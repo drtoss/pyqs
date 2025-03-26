@@ -6,6 +6,7 @@ gNow = None			# The current time
 gdebug = ''			# Debugging options string
 ghostname = ''			# Our hostname
 ghostnameshort = ''		# Short hostname
+ghuman = False          # Use human readable times (-W human)
 host_re = None			# Hostname pattern
 opts_W = list()			# -W options, as list
 pbs_conf = None			# pbs config options
