@@ -339,7 +339,7 @@ def load_usage_from_jobs(fname, tree, patts, weights):
         fs.close()
     interesting = ['egroup', 'euser', 'resources_used', 'schedselect',
                    'Account_Name', 'job_state', 'obittime', 'stime',
-                   'group_list']
+                   'group_list', 'Resource_List']
     jobs = lines_to_stat(lines, interesting)
     del lines
     for job in jobs:

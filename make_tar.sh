@@ -9,7 +9,7 @@ set -e
 dir=$(mktemp -d -p . bldXXXXXX)
 cd $dir
 chmod 755 .
-mkdir -p -m 755 bin lib lib/site man man/man1 man/man3 man/man8
+mkdir -p -m 755 bin lib lib/site lib/aarch64 lib/x86_64 man man/man1 man/man3 man/man8
 ln -s ../../nas_pbsfs bin/
 ln -s ../../nas_qstat bin/
 ln -s ../../nas_rstat bin/
@@ -21,6 +21,12 @@ ln -s ../../nas_xstat_config.py lib/
 ln -s ../../qstat_userexits lib/
 ln -s ../../pbs_ifl.py lib/
 ln -s ../../_pbs_ifl.so lib/
+if [ -e ../arm_pbs_ifl.so ]; then
+ln -s ../../../arm_pbs_ifl.so lib/aarch64/_pbs_ifl.so
+fi
+if [ -e ../x86_pbs_ifl.so ]; then
+ln -s ../../../x86_pbs_ifl.so lib/x86_64/_pbs_ifl.so
+fi
 ln -s ../../../example_new_field lib/site/
 ln -s ../../../qstat_fs_exits lib/site/
 ln -s ../../../qstat_userexits lib/site/
@@ -31,4 +37,4 @@ ln -s ../../../nas_pbsfs.8 man/man8/
 tar -czf ../${1:-nas_qstat.tgz} --dereference --owner=0 --group=0 .
 
 cd ..
-echo rm -r $dir
+rm -r $dir

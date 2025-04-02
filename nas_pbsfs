@@ -35,7 +35,17 @@ if True:
     import nas_fsutil as fsu
     from nas_fsutil import share_id_map, share_name_map
     import nas_xstat_config as conf
-    import pbs_ifl as ifl
+    try:
+        import pbs_ifl as ifl
+    except ImportError:
+        (head, tail) = os.path.split(sys.path[0])
+        t = sys.path[0]
+        if tail == 'bin':
+            t = os.path.join(head, 'lib')
+        t = os.path.join(t, os.uname().machine)
+        print(t)
+        sys.path.insert(0, t)
+        import pbs_ifl as ifl
     from nas_pbsutil import *
     import nas_layout as layout
     import nas_field_format

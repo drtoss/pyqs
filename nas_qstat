@@ -115,7 +115,16 @@ if check_perms():
     import time
     from math import *
 
-    import pbs_ifl as ifl
+    try:
+        import pbs_ifl as ifl
+    except ImportError:
+        (head, tail) = os.path.split(sys.path[0])
+        t = sys.path[0]
+        if tail == 'bin':
+            t = os.path.join(head, 'lib')
+        t = os.path.join(t, os.uname().machine)
+        sys.path.insert(0, t)
+        import pbs_ifl as ifl
     from nas_pbsutil import *
     import nas_layout as layout
     import nas_field_format
@@ -326,10 +335,11 @@ def main():
         import nas_fsutil as fsu
         globals()['fsu'] = fsu
         if gNAS:
-            # At NAS, some file are in non-standard locations
+            # TODO Temporary hack. Should move to site qstat_userexits
+            # At NAS, some files are in non-standard locations
             t = os.path.join(pbs_conf.pbs_home_path, 'sched_priv', 'usage')
             if not os.path.exists(t):
-                fsu.set_fs_info(None, sp='/PBS/current/pbs_home')
+                fsu.set_fs_info(None, sp='/PBS/2024.1.1/pbs_home/sched_priv')
         # Possibly override some file locations from -W options
         for (short, long) in (('sp', 'sched_priv'), ('ff', 'formula_file'),
                               ('gf', 'groups_file'), ('sf', 'shares_file'),
@@ -1376,7 +1386,8 @@ def gen_field_list():
     fl.append(gen_field('runs', 'Runs', rj, 'fmt_by_attr', 'run_count'))
     fl.append(gen_field('s', 'S', None, 'fmt_by_attr', 'job_state'))
     fl.append(gen_field('sbu_rate', 'SBU_rate', hlrj, 'fmt_sbu_rate',
-                        'resources_used Resource_List schedselect'))
+                        'resources_used Resource_List schedselect '
+                        'Account_Name'))
     fl.append(gen_field('sessid', 'SessID', rj, 'fmt_by_attr', 'session_id'))
     fl.append(gen_field('seqno', 'SeqNo', None, 'fmt_seqno', None))
     fl.append(gen_field('ss', 'Ss', None, 'fmt_jobstate',
@@ -1918,7 +1929,7 @@ def plug_fs_info(bs, sname, conn):
         sbs = ifl.pbs_statserver(conn, None, None)
         if sbs:
             formula = sbs[0].get('job_sort_formula')
-    if formula == '':
+    if formula == '' or formula is None:
         formula = '0'
     compiled = compile(formula, '<string>', 'eval')
 
@@ -1939,7 +1950,8 @@ def plug_fs_info(bs, sname, conn):
         if isinstance(sbu_rate, str):
             print(f'Cannot get sbu_rate for {jobname}: {sbu_rate}')
             job['Resource_List.sbu_rate'] = sbu_rate = 0.0
-        entity = fsu.set_account_name(job, fs_patts)
+        owner = job.get('Job_Owner', None)
+        entity = fsu.set_account_name(job, fs_patts, owner)
         if not entity:
             print(f'Cannot get fairshare entity for {jobname}',
                   file=sys.stderr)

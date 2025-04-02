@@ -1,14 +1,14 @@
 # This set of nas_qstat user exits shows how to use the nas_fsutil python
 # module to add fairshare information to the nas_qstat output.
 
-# The add_fields exit adds two fields, sbu_rate and jfv, to the fields
+# The add_fields exit adds two fields, sbu_rate and jsfv, to the fields
 # available from nas_qstat. The sbu_rate displays the NAS local job
 # attribute "sbu_rate" which measures how quickly a job accumulates
-# charges. The jsv field (job sort formula value) displays the value
+# charges. The jsfv field (job sort formula value) displays the value
 # of the job_sort_formula used by the scheduler at NAS.
 
-# The post_job_stat user exit calculates the jsv value and adds it to
-# the job info so it is available to the fmt_jfv routine.
+# The post_job_stat user exit calculates the jsfv value and adds it to
+# the job info so it is available to the fmt_jsfv routine.
 # At non-NAS sites, you'll need to change some of the constants near
 # the beginning as well as the value of formula later on.
 
@@ -17,8 +17,8 @@ if not args.B and not args.Q:
     def my_post_opts(gbl, lcl):
         default_W = lcl['default_W']
         default_W.extend(['NAS'])
-        default_W.extend(['o=+sbu_rate,jfv'])
-        # Disable the default sort so we can sort by jsv
+        default_W.extend(['o=+sbu_rate,jsfv'])
+        # Disable the default sort so we can sort by jsfv
         default_W.extend(['do_sort=f'])
 
     userexit_post_opts = stack_userexit(userexit_post_opts, my_post_opts)
@@ -35,18 +35,18 @@ if not args.B and not args.Q:
             return '--'
         setattr(nas_field_format, 'fmt_sbu_rate', fmt_sbu_rate)
 
-        def fmt_jfv(fi, info):
+        def fmt_jsfv(fi, info):
             # job formula value
             rval = info.get('jsf_value')
             if rval is not None:
                 return "%.1f" % rval
             return '--'
-        setattr(nas_field_format, 'fmt_jfv', fmt_jfv)
+        setattr(nas_field_format, 'fmt_jsfv', fmt_jsfv)
         fmtr = lcl.get('fmtr')
         t = gen_field('sbu_rate', 'SBU_rate', {'hj': 'r'}, 'fmt_sbu_rate',
                       'resources_used Resource_List schedselect')
         fmtr.known_fields.append(t)
-        t = gen_field('jfv', ['Formula', 'value'], {'hj': 'r'}, 'fmt_jfv',
+        t = gen_field('jsfv', ['Formula', 'value'], {'hj': 'r'}, 'fmt_jsfv',
             'resources_used euser egroup Account_Name eligible_time queue')
         fmtr.known_fields.append(t)
     userexit_add_fields = stack_userexit(userexit_add_fields, my_add_fields)
@@ -110,15 +110,15 @@ if not args.B and not args.Q:
         # Now that we have share factors, compute job_sort_formulas
         formula = '''fairshare_factor * 1e9 + (job_priority if job_priority != 0 else (queue_priority + min(20, eligible_time / 28800 * 2))) * 1e6 + queue_priority * 1e3 + math.log2(sbu_rate + 1)'''
         compiled = compile(formula, '<string>', 'eval')
-        max_jfv = 0.0
+        max_jsfv = 0.0
         for job in bs:
             t = set_sort_formula(job, compiled, qinfo)
-            if t > max_jfv:
-                max_jfv = t
+            if t > max_jsfv:
+                max_jsfv = t
         # Finally, re-sort the list
 
         def my_cmp(job):
-            base = 0.0 if job['job_state'] in 'HQTW' else -max_jfv
+            base = 0.0 if job['job_state'] in 'HQTW' else -max_jsfv
             return base - job['jsf_value']
         bs.sort(key=my_cmp)
 
