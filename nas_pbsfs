@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python3 -I
 
 '''Display information about Altair fairshares
 
@@ -7,31 +7,115 @@ to pbsfs, but accepts field selections similarly to nas_qstat.
 Unlike pbsfs, it is display only. Use pbsfs to alter fairshare entries.
 '''
 
-import sys
-import os
-import argparse
-import copy
-import math
-import re
-import signal
-import stat
-import struct
-import time
-from sys import stdin, stdout, stderr
+# Because this program might be run as root, or with
+# a random environment, check for some conditions that
+# might cause security issues.
 
-# Need to add local libraries to sys.path
 
-t = os.path.dirname(sys.argv[0])
-t = os.path.abspath(t)
-if t not in sys.path:
-    sys.path.insert(0, t)
-(head, tail) = os.path.split(t)
-if tail == 'bin':
-    t = os.path.join(head, 'lib')
-    if t not in sys.path and os.path.exists(t):
-        sys.path.insert(1, t)
-if True:
-    # Indented to avoid gripes from PEP-8 checkers
+def check_perms():
+    import sys
+    import os
+    import stat
+    user = os.getuid()
+    # First, clean up python search path by removing
+    # dodgy entries.
+    newp = []
+    for x in sys.path:
+        if x == '':
+            continue
+        try:
+            sb = os.stat(x)
+        except OSError:
+            continue
+        # Skip items not owned by root, unless
+        # running as the owner of the item.
+        if sb.st_uid != 0 and user != sb.st_uid:
+            continue
+        # Skip non-directories in path
+        if not stat.S_ISDIR(sb.st_mode):
+            continue
+        # Skip things that others can modify
+        mode = stat.S_IMODE(sb.st_mode)
+        if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
+            continue
+        if x not in newp:
+            newp.append(x)
+    # Update sys.path to what is left
+    sys.path.clear()
+    sys.path.extend(newp)
+
+    # Now, check that we haven't already loaded
+    # suspect items.
+    for name, val in sys.modules.items():
+        src = str(val)
+        pcs = src.split()
+        pathpart = pcs[-1]
+        path = pathpart[1:-2]
+        if path in ['built-in', 'frozen']:
+            continue
+        if name == '__main__':
+            # For debugging, we might need to
+            # add the directory where the script
+            # resides back to sys.path, if
+            # the -I flag removed it.
+            # First, though, deal with invoked through symlink.
+            t = os.path.dirname(path)
+            sb = os.lstat(path)
+            if stat.S_ISLNK(sb.st_mode):
+                r = os.readlink(path)
+                t = os.path.join(t, r)
+                t = os.path.dirname(t)
+            t = os.path.abspath(t)
+            if t not in sys.path:
+                sys.path.insert(0, t)
+            # If path ends in bin, try to add equivalent lib directory
+            (head, tail) = os.path.split(t)
+            if tail != 'bin':
+                continue
+            t = os.path.join(head, 'lib')
+            if t in sys.path:
+                # Already there
+                continue
+            if not os.path.exists(t):
+                continue
+            # Repeat some security checks
+            try:
+                sb = os.lstat(t)
+            except OSError:
+                continue
+            if not stat.S_ISDIR(sb.st_mode):
+                continue
+            mode = stat.S_IMODE(sb.st_mode)
+            if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
+                continue
+            # Add lib to path
+            sys.path.insert(1, t)
+            continue
+        if "' from '" in src:
+            sb = os.stat(path)
+            if sb.st_uid != 0 and user != sb.st_uid:
+                raise OSError("Unsafe PYTHONPATH with " + path)
+            mode = stat.S_IMODE(sb.st_mode)
+            if (mode & (stat.S_IWGRP | stat.S_IWOTH)):
+                raise OSError("Unsafe PYTHONPATH for " + path)
+    return True
+
+
+if check_perms():
+    # These imports are indented this way just to avoid gripes from
+    # PEP-8 checkers.
+
+    import sys
+    import os
+    import argparse
+    import copy
+    import math
+    import re
+    import signal
+    import stat
+    import struct
+    import time
+    from sys import stdin, stdout, stderr
     import nas_fsutil as fsu
     from nas_fsutil import share_id_map, share_name_map
     import nas_xstat_config as conf
@@ -60,7 +144,7 @@ opts_W = list()
 
 def main():
     global args, version, gdebug, shost, hostname, pbs_exec, pbs_home
-    global sched_priv, groups_file, usage_file, opts_W
+    global sched_priv, opts_W
     # Don't catch any signals (so no ugly tracebacks on Ctrl-C).
     for i in range(1, signal.NSIG):
         try:
@@ -90,6 +174,8 @@ def main():
                         help='share attribute to sort on')
     parser.add_argument('--new_usage', action='store', default='new_usage',
                         help='where to write -c usage info')
+    parser.add_argument('--sp', '--sched_priv', action='store',
+                        help='location of sched_priv directory')
     parser.add_argument('--usage', action='store',
                         help='path to input usage file')
     parser.add_argument('--ua', '--unknown_alloc', default=None,
@@ -113,11 +199,12 @@ def main():
         return 1
     conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
     set_paths(pbs_conf)
+    if args.sp:
+        fsu.set_fs_info(None, sp=args.sp)
     if args.groups:
-        groups_file = args.groups
+        fsu.set_fs_info(None, gf=args.groups)
     if args.usage:
-        usage_file = args.usage
-    fsu.set_fs_info(None, gf=groups_file, uf=usage_file)
+        fsu.set_fs_info(None, uf=args.usage)
     if args.ua:
         fsu.set_fs_info(None, ua=float(args.ua))
     if args.convert:
@@ -141,8 +228,18 @@ def main():
     default_W = []
     userexit_post_opts(globals(), locals())
     opts_W[0:0] = default_W
-    known_fields = gen_field_list()
+    # Possibly override some file locations from -W options
+    for (short, long) in (('sp', 'sched_priv'), ('ff', 'formula_file'),
+                          ('gf', 'groups_file'), ('sf', 'shares_file'),
+                          ('uf', 'usage_file')
+                          ):
+        value = check_W_str(short)
+        if not value:
+            value = check_W_str(long)
+        if value:
+            fsu.set_fs_info(None, [short, value])
     # Scan opts_W for on-the-fly field defs
+    known_fields = gen_field_list()
     define_on_the_fly(known_fields, opts_W)
     fmtr = NAS_field_format(default_fields)
     fmtr.known_fields = known_fields
@@ -162,7 +259,7 @@ def main():
     fmtr.field_list = field_list
     nas_field_format.set_field_vars(opts_W)
     # Build resource_group tree
-    result = fsu.load_fs_info(groups_file)
+    result = fsu.load_fs_info(fsu.groups_file)
     if isinstance(result, str):
         print(result, file=stderr)
         sys.exit(1)
@@ -354,7 +451,6 @@ def check_W_str(name, default=''):
 
 def set_paths(pbs_conf):
     global pbs_home, pbs_exec, hostname, shost, sched_priv
-    global groups_file, usage_file
     pbs_home = pbs_conf.pbs_home_path
     pbs_exec = pbs_conf.pbs_exec_path
     hostname = pbs_conf.pbs_server_name
