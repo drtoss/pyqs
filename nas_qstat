@@ -339,7 +339,7 @@ def main():
             # At NAS, some files are in non-standard locations
             t = os.path.join(pbs_conf.pbs_home_path, 'sched_priv', 'usage')
             if not os.path.exists(t):
-                fsu.set_fs_info(None, sp='/PBS/2024.1.1/pbs_home/sched_priv')
+                fsu.set_fs_info(sp='/PBS/2024.1.1/pbs_home/sched_priv')
         # Possibly override some file locations from -W options
         for (short, long) in (('sp', 'sched_priv'), ('ff', 'formula_file'),
                               ('gf', 'groups_file'), ('sf', 'shares_file'),
@@ -349,9 +349,9 @@ def main():
             if not value:
                 value = check_W_str(long)
             if value:
-                fsu.set_fs_info(None, [short, value])
+                fsu.set_fs_info([short, value])
         # Assume job info is good
-        fsu.set_fs_info(None, tj=True)
+        fsu.set_fs_info(tj=True)
         result = fsu.load_fs_info(fsu.groups_file)
         if isinstance(result, str):
             print(f'Problem loading fairshare info: {result}', file=sys.stderr)
@@ -1337,6 +1337,7 @@ def gen_field_list():
                         'etime'))
     fl.append(gen_field('eligtime', ['Elig', 'time'], rj, 'fmt_elig_time',
                         'eligible_time'))
+    fl.append(gen_field('entity', 'Entity', None, 'fmt_entity', None))
     fl.append(gen_field('estend', ['Est', 'end'], None, 'fmt_est_end',
                         'job_state stime estimated Resource_List '
                         'resources_used'))
@@ -1951,12 +1952,12 @@ def plug_fs_info(bs, sname, conn):
             print(f'Cannot get sbu_rate for {jobname}: {sbu_rate}')
             job['Resource_List.sbu_rate'] = sbu_rate = 0.0
         owner = job.get('Job_Owner', None)
-        entity = fsu.set_account_name(job, fs_patts, owner)
+        entity = fsu.set_entity_name(job, fs_patts, owner)
         if not entity:
             print(f'Cannot get fairshare entity for {jobname}',
                   file=sys.stderr)
             entity = fsu.UNKNOWN_GROUP_NAME
-        job['entity'] = entity
+        job['NAS_entity'] = entity
         # Now that we have share factors, evaluate job_sort_formula
         t = set_sort_formula(job, compiled, qinfo)
         if t > max_jsfv:
@@ -1983,8 +1984,10 @@ def set_sort_formula(info, comp, qinfo):
     Note that we need to be careful about what variables are available
     to the formula, so we del them.
     '''
-    share = fsu.share_name_map[info['entity']]
+    share = fsu.share_name_map[info['NAS_entity']]
     fairshare_factor = share.fs_factor
+    fairshare_perc = share.tree_pct
+    fairshare_tree_usage = share.usage_factor
     job_priority = int(info.get('Priority', 0))
     t = info.get('eligible_time', '0')
     eligible_time = nas_field_format.clocktosecs(t)

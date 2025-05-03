@@ -60,7 +60,7 @@ class Share:
         self.depth = 0              # indent to print in tree form
 
 
-def set_fs_info(hn, *lst, **kwds):
+def set_fs_info(*lst, **kwds):
     '''Set global values for other routines
 
     Args:
@@ -78,8 +78,6 @@ def set_fs_info(hn, *lst, **kwds):
     global shost, fs_decay_factor, fs_decay_time, groups_file, unknown_alloc
     global usage_file, trust_job_info, gnow, asof_time, nas_shares_file
     global sched_priv, sched_config, formula_file
-    if hn:
-        shost = hn.split('.')[0]
     args = dict(lst)
     if kwds:
         args.update(kwds)
@@ -90,6 +88,8 @@ def set_fs_info(hn, *lst, **kwds):
             fs_decay_time = value
         elif key == 'ff':
             formula_file = value
+        elif key == 'hn':
+            shost = value.split('.')[0]
         elif key == 'gf':
             groups_file = value
         elif key == 'sc':
@@ -106,7 +106,7 @@ def set_fs_info(hn, *lst, **kwds):
         elif key == 'tj':
             trust_job_info = value
         elif key == 'ua':
-            unknown_alloc = value
+            unknown_alloc = float(value)
         elif key == 'uf':
             usage_file = value
         elif key == 'rs':
@@ -347,7 +347,7 @@ def load_usage_from_jobs(fname, tree, patts, weights):
         # Ignore jobs that finish without starting (e.g. qdeled)
         if job.get('job_state') == 'F' and job.get('stime', None) is None:
             continue
-        entity = set_account_name(job, patts)
+        entity = set_entity_name(job, patts)
         if entity not in share_name_map:
             print(f'Unknown entity for job {jobname}', file=stderr)
             entity = UNKNOWN_GROUP_NAME
@@ -415,8 +415,8 @@ def calc_aged_walltime(job):
     return result
 
 
-def set_account_name(job, patts, requestor=None):
-    '''Set job's Account_Name
+def set_entity_name(job, patts, requestor=None):
+    '''Set job's entity
 
     We're assuming the Account_Name will be used by fairshare as the
     entity to associate with job usage (fairshare_entity).
@@ -429,13 +429,17 @@ def set_account_name(job, patts, requestor=None):
         patts = patterns mapping group:user to entity
         requestor = user requesting action (for qsub)
     Returns:
-        selected entity, also put in job's Account_Name attribute
+        selected entity, also put in job's entity attribute
         None if lookup failed
     '''
+    entity = job.get('NAS_entity')
+    if entity:
+        return entity
     entity = job.get('Account_Name')
     if entity and trust_job_info:
         if entity not in share_name_map:
             entity = UNKNOWN_GROUP_NAME
+        job['NAS_entity'] = entity
         return entity
     euser = job.get('euser')
     if euser is None:
@@ -456,7 +460,7 @@ def set_account_name(job, patts, requestor=None):
             return None
     entity = get_share_name(egroup, euser, patts)
     if entity:
-        job['Account_Name'] = entity
+        job['NAS_entity'] = entity
     return entity
 
 
@@ -871,6 +875,49 @@ def write_new_usage(fname, shares):
     return
 
 
+def load_sched_conf(fname):
+    '''Read sched_config file
+
+    Read the file and return a dict of the keys and values
+
+    Args:
+        fname = path to sched_config file
+    Returns:
+        dict
+        str with text on error
+    '''
+    try:
+        with open(fname) as fs:
+            buf = fs.read()
+    except IOError:
+        return "Unable to read config file" + fname
+    settings = dict()
+    lineno = 0
+    for line in buf.splitlines():
+        lineno += 1
+        if line.startswith('#'):
+            continue
+        if line.strip() == '':
+            continue
+        line = line.expandtabs()
+        flds = line.split(':', 1)
+        if len(flds) != 2:
+            return f"Bad format at {fname}:{lineno} {line}"
+        key = flds[0].strip()
+        value = flds[1].strip()
+        if not key.isidentifier():
+            return f"Bad line at {fname}:{lineno} {line}"
+        # Handle keys that can appear multiple times
+        if key.endswith('_sort_key'):
+            if key in settings:
+                settings[key].extend([value])
+            else:
+                settings[key] = [value]
+        else:
+            settings[key] = value
+    return settings
+
+
 clockre = re.compile(r'((\d+)\+)?(\d+):(\d+)(:(\d+))?$')
 
 
@@ -893,6 +940,11 @@ def clocktosecs(v):
     minutes = int(minutes) if minutes else 0
     seconds = int(seconds) if seconds else 0
     return seconds + 60 * (minutes + 60 * (hours + 24 * days))
+
+
+if __name__ == 'XXX__main__':
+    print(load_sched_conf('sched_config'))
+    sys.exit(0)
 
 
 # vi:ts=4:sw=4:expandtab

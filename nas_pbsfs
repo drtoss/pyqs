@@ -199,14 +199,6 @@ def main():
         return 1
     conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
     set_paths(pbs_conf)
-    if args.sp:
-        fsu.set_fs_info(None, sp=args.sp)
-    if args.groups:
-        fsu.set_fs_info(None, gf=args.groups)
-    if args.usage:
-        fsu.set_fs_info(None, uf=args.usage)
-    if args.ua:
-        fsu.set_fs_info(None, ua=float(args.ua))
     if args.convert:
         if not args.job_file:
             print('convert option requires --job_file', file=stderr)
@@ -223,28 +215,38 @@ def main():
     # Load possible user or system overrides
     more_code = load_userexits('pbsfs')
     if more_code:
+        more_code = userexits_header + more_code
         prog = compile(more_code, 'userexit code', 'exec')
         exec(prog, globals(), locals())
     default_W = []
     userexit_post_opts(globals(), locals())
     opts_W[0:0] = default_W
-    # Possibly override some file locations from -W options
+    # Possibly preset some file locations from -W options
     for (short, long) in (('sp', 'sched_priv'), ('ff', 'formula_file'),
                           ('gf', 'groups_file'), ('sf', 'shares_file'),
-                          ('uf', 'usage_file')
+                          ('uf', 'usage_file'), ('ua', 'unknown_alloc')
                           ):
         value = check_W_str(short)
         if not value:
             value = check_W_str(long)
         if value:
-            fsu.set_fs_info(None, [short, value])
+            fsu.set_fs_info([short, value])
+    # Command line options override userexit defaults.
+    if args.sp:
+        fsu.set_fs_info(sp=args.sp)
+    if args.groups:
+        fsu.set_fs_info(gf=args.groups)
+    if args.usage:
+        fsu.set_fs_info(uf=args.usage)
+    if args.ua:
+        fsu.set_fs_info(ua=float(args.ua))
     # Scan opts_W for on-the-fly field defs
     known_fields = gen_field_list()
     define_on_the_fly(known_fields, opts_W)
     fmtr = NAS_field_format(default_fields)
     fmtr.known_fields = known_fields
     userexit_add_fields(globals(), locals())
-    # Handle -W options
+    # Handle other -W options
     (field_list, attr_list, errs) = fmtr.collect_fields()
     if (errs):
         # Check if should just print list of fields
@@ -268,13 +270,13 @@ def main():
         sys.exit(1)
     # Insert usage info
     if args.convert:
-        fsu.set_fs_info(None, tj=True)
+        fsu.set_fs_info(tj=True)
         result = fsu.load_usage_from_jobs(args.job_file, root, patts, weights)
-        if args.new_usage:
-            result = fsu.write_new_usage(args.new_usage, share_id_map.values())
     else:
         fsu.load_usage(root)
     fsu.reconcile_usage(root)
+    if args.new_usage:
+        result = fsu.write_new_usage(args.new_usage, share_id_map.values())
     if args.f:
         display_f(args, root, "Group Name", "Group")
         return 0
@@ -461,7 +463,7 @@ def set_paths(pbs_conf):
         if os.path.exists(usage_file):
             break
     groups_file = os.path.join(os.path.dirname(usage_file), 'resource_group')
-    fsu.set_fs_info(shost, gf=groups_file, uf=usage_file)
+    fsu.set_fs_info(hn=shost, gf=groups_file, uf=usage_file)
 
 
 if __name__ == '__main__':

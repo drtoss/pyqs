@@ -8,7 +8,7 @@
 .B Displaying Fairshare Status
 .RS 5
 .B nas_pbsfs
-[--groups group_file] [--usage usage_file] [-t] [-W display_option] [-g group ...]
+[--groups group_file] [--usage usage_file] [--sp sched_priv] [-t] [-W display_option] [-k sort_key] [-g group ...]
 .sp
 .RE
 .B Creating A Usage File
@@ -53,6 +53,10 @@ Display version of
 .BR nas_pbsfs .
 .PP
 .B Options For Displaying Fairshare Information
+.IP "-k key" 10
+Share table field to sort output for display. Use
+.B "-k ?"
+to get a list of valid field names.
 .IP "-t" 10
 Display groups in a tree, with sub-groups indented below their parent
 group.
@@ -62,6 +66,10 @@ Specify a different group file from the default
 .IP "--usage usage_file"
 Specify a different group usage file from the default
 .IR PBS_HOME/sched_priv/usage .
+.IP "--sp sched_dir"
+Specify an alternate sched_priv directory, where
+.B nas_pbsfs
+will look for resource_group and usage files.
 .IP "-W option"
 Specify which fields to display and how they should be displayed.
 See
@@ -108,6 +116,22 @@ much of total usage the group is responsible for.
 .B fsfact
 (fairshare\ factor) The relative fairness factor, available to
 JOB_SORT_FORMULA as "fairshare_factor").
+.RE
+.IP "-W paths"
+The
+.B \-W
+option can also be used to override defaults.
+.RS
+.TP
+.B "sp=dir sched_priv=dir"
+Location of scheduler's sched_priv directory, instead of default
+.IR PBS_HOME/sched_priv .
+.TP
+.B "gf=file groups_file=file"
+Equivalent to command line --gf option.
+.TP
+.B "uf=file usage_file=file"
+Equivalent to command line --uf option.
 .RE
 .SH EXIT STATUS
 .B nas_pbsfs

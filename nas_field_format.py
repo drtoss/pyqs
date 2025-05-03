@@ -397,6 +397,10 @@ def fmt_elig_time(fi, info):
     return secstoclock(clocktosecs(rawv), False, ghuman)
 
 
+def fmt_entity(fi, info):
+    return info.get('NAS_entity', '--')
+
+
 def fmt_est_end(fi, info):
     guess = ''
     start = info.get('stime', None)
@@ -546,7 +550,12 @@ def fmt_lifetime(fi, info):
 
 def fmt_mission(fi, info):
     global gshare_entity_info
-    # First, see if Account_Name has mission (put there by NAS hook)
+    # First, see if job has 'NAS_entity' attribute, put there
+    # by nas_fsutil code.
+    entity = info.get('NAS_entity', None)
+    if entity:
+        return entity
+    # See if Account_Name has mission (put there by NAS hook)
     entity = info.get('Account_Name', None)
     if entity and ':' not in entity:
         return entity
