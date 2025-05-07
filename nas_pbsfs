@@ -172,6 +172,8 @@ def main():
                         help='output from nas_qstat -xf for -c usage info')
     parser.add_argument('-k', action='store',
                         help='share attribute to sort on')
+    parser.add_argument('--new_jobs', action='store', default=None,
+                        help='where to write -c updated job info')
     parser.add_argument('--new_usage', action='store', default='new_usage',
                         help='where to write -c usage info')
     parser.add_argument('--sp', '--sched_priv', action='store',
@@ -223,7 +225,8 @@ def main():
     opts_W[0:0] = default_W
     # Possibly preset some file locations from -W options
     for (short, long) in (('sp', 'sched_priv'), ('ff', 'formula_file'),
-                          ('gf', 'groups_file'), ('sf', 'shares_file'),
+                          ('gf', 'groups_file'), ('sc', 'sched_config'),
+                          ('sf', 'shares_file'),
                           ('uf', 'usage_file'), ('ua', 'unknown_alloc')
                           ):
         value = check_W_str(short)
@@ -231,6 +234,8 @@ def main():
             value = check_W_str(long)
         if value:
             fsu.set_fs_info([short, value])
+    # Load fs params from config file
+    fsu.set_from_conf()
     # Command line options override userexit defaults.
     if args.sp:
         fsu.set_fs_info(sp=args.sp)
@@ -271,7 +276,8 @@ def main():
     # Insert usage info
     if args.convert:
         fsu.set_fs_info(tj=True)
-        result = fsu.load_usage_from_jobs(args.job_file, root, patts, weights)
+        result = fsu.load_usage_from_jobs(args.job_file, root, patts, weights,
+                                          args)
     else:
         fsu.load_usage(root)
     fsu.reconcile_usage(root)

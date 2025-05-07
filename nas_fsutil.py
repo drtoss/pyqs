@@ -20,9 +20,10 @@ map_cache = dict()
 
 # These defaults should be overridden by the caller.
 # See set_fs_info() for how to change them.
-fs_decay_time = 24 * 3600.0
+fs_decay_interval = 24 * 3600.0
 fs_decay_factor = 0.5
 unknown_alloc = 10
+unknown_grp_id = 0
 sched_priv = '/var/spool/pbs/sched_priv'
 sched_config = os.path.join(sched_priv, 'sched_config')
 formula_file = None
@@ -66,16 +67,17 @@ def set_fs_info(*lst, **kwds):
     Args:
         hn = hostname
         df = fs_decay_factor (float)
-        dt = fs_decay_time (seconds)
+        di = fs_decay_interval (seconds)
         ff = job sort formula file
         gf = groups_file (resource_groups) path
         rs = reset global maps
+        sc = sched_config file
         sf = NAS shares file
         sp = sched_priv directory
         ua = unknown_alloc (float)
         uf = usage_file path
     '''
-    global shost, fs_decay_factor, fs_decay_time, groups_file, unknown_alloc
+    global shost, fs_decay_factor, fs_decay_interval, groups_file, unknown_alloc
     global usage_file, trust_job_info, gnow, asof_time, nas_shares_file
     global sched_priv, sched_config, formula_file
     args = dict(lst)
@@ -84,8 +86,8 @@ def set_fs_info(*lst, **kwds):
     for (key, value) in args.items():
         if key == 'df':
             fs_decay_factor = value
-        elif key == 'dt':
-            fs_decay_time = value
+        elif key == 'di':
+            fs_decay_interval = value
         elif key == 'ff':
             formula_file = value
         elif key == 'hn':
@@ -106,7 +108,7 @@ def set_fs_info(*lst, **kwds):
         elif key == 'tj':
             trust_job_info = value
         elif key == 'ua':
-            unknown_alloc = float(value)
+            unknown_alloc = int(value)
         elif key == 'uf':
             usage_file = value
         elif key == 'rs':
@@ -301,7 +303,7 @@ def load_usage(root):
         root = root of shares tree
     Globals
         usage_file = path to group usage data
-        asof_time = set to timestamp from usage_file
+        asof_time = set based on timestamp from usage_file
     '''
     global asof_time
     with open(usage_file, 'rb') as fd:
@@ -315,19 +317,63 @@ def load_usage(root):
     if magic != MAGIC_NAME or header[1] != 2.0:
         print(f"Bad usage file header: {usage_file}", file=stderr)
         sys.exit(1)
-    asof_time = header[2]
+    # The timestamp in the usage file header is the time of the most
+    # recent decay. So, we can accept anything up to next decay.
+    asof_time = header[2] + fs_decay_interval - 1
     use_fmt = '50sd'
     for entry in struct.iter_unpack(use_fmt, buf[sz:]):
         name = str(entry[0].partition(b'\0')[0], encoding='utf-8')
+        # Handle entities not in group file
         if name not in share_name_map:
-            name = UNKNOWN_GROUP_NAME
-        share_name_map[name].usage = entry[1]
+            share = add_unknown_group(name)
+            if share is None:
+                name = UNKNOWN_GROUP_NAME
+        share_name_map[name].usage += entry[1]
+    # Set values for any children of unknown
+    calc_fs_percent(share_name_map[UNKNOWN_GROUP_NAME])
     return
 
 
-def load_usage_from_jobs(fname, tree, patts, weights):
+def add_unknown_group(name):
+    '''Add a child of the unknown group
+
+    Args:
+        name = entity to add
+    Returns:
+        entity's Share
+        None if not allowed to have unknown entities
+    '''
+    global unknown_grp_id
+    unk = share_name_map[UNKNOWN_GROUP_NAME]
+    if unk.alloc == 0:
+        return None
+    share = new_group(name, unk.grp_id, unknown_grp_id)
+    unknown_grp_id += 1
+    # Link it in
+    share.alloc = unknown_alloc
+    share.parent = unk
+    share.par_id = unk.grp_id
+    insert_child(unk, share)
+    share.grp_path = create_group_path(share)
+    return share
+
+
+def load_usage_from_jobs(fname, tree, patts, weights, args={}):
+    '''Compute usage from job info.
+
+    Re-calculate usage info from job info dump.
+
+    Args:
+        fname = path to file with nas_qstat -xf output
+        tree = entity tree build from groups file
+        patts = [NAS only] patterns to map egroup:euser to entity
+        weights = [NAS only] mapping from node model info to SBU rating
+        args = options dict
+    Returns:
+        True on success
+    '''
     global asof_time
-    from nas_pbsutil import lines_to_stat
+    from nas_pbsutil import lines_to_stat, info_to_file
     if fname == '-':
         fs = stdin
     else:
@@ -339,80 +385,97 @@ def load_usage_from_jobs(fname, tree, patts, weights):
         fs.close()
     interesting = ['egroup', 'euser', 'resources_used', 'schedselect',
                    'Account_Name', 'job_state', 'obittime', 'stime',
+                   'etime',
                    'group_list', 'Resource_List']
+    if args.new_jobs:
+        # If writing updated jobs file, keep all attributes
+        interesting = []
     jobs = lines_to_stat(lines, interesting)
     del lines
     for job in jobs:
         jobname = job['id']
-        # Ignore jobs that finish without starting (e.g. qdeled)
-        if job.get('job_state') == 'F' and job.get('stime', None) is None:
+        job_state = job.get('job_state', '?')
+        # Ignore jobs with no start time
+        t = job.get('stime')
+        if t is None:
             continue
+        stime = int(t.split()[0])
+        if stime > asof_time:
+            # Ignore jobs started after as-of time
+            print(f'{jobname} starts after end of window')
+            continue
+        # Get walltime to compute end time
+        t = job.get('resources_used.walltime')
+        if t is None:
+            continue
+        t = clocktosecs(t)
+        etime = stime + t
         entity = set_entity_name(job, patts)
         if entity not in share_name_map:
-            print(f'Unknown entity for job {jobname}', file=stderr)
-            entity = UNKNOWN_GROUP_NAME
+            share = add_unknown(entity)
+            if share is None:
+                print(f'Unknown entity for job {jobname}: {entity}',
+                      file=stderr)
+                entity = UNKNOWN_GROUP_NAME
         sbu_rate = set_sbu_rate_nh(job, weights)
         if isinstance(sbu_rate, str):
             print(f'Cannot compute SBU rate for job {jobname} {sbu_rate}',
                   file=stderr)
             continue
-        effective_wt = calc_aged_walltime(job)
-        eff_sbus = sbu_rate * effective_wt
+        # Multiply sbu_rate by decayed walltime
+        use_scale = compute_scale(stime, etime, asof_time)
+        eff_sbus = sbu_rate * use_scale
         share = share_name_map[entity]
         share.usage += eff_sbus
+    # Set values for any children of unknown
+    calc_fs_percent(share_name_map[UNKNOWN_GROUP_NAME])
+    # Write updated job file
+    if args.new_jobs:
+        with open(args.new_jobs, 'w') as fd:
+            info_to_file(fd, jobs, 'Job')
     return True
 
 
-def calc_aged_walltime(job):
-    '''Calculate walltime after decay
+def compute_scale(stime, etime, asof):
+    '''Compute the decay factor for a constant usage
+
+    That is, given a constant job usage rate from stime to etime,
+    compute the factor the usage rate should be multiplied by to
+    determine the total usage, taking decays into account.
 
     Args:
-        info = info for job
+        stime = job start time (epoch)
+        etime = job end time (epoch)
+        asof = timestamp to compute factor relative to
+    Globals:
+        fs_decay_factor = multiplier at each decay interval
+        fs_decay_interval = seconds between decays
     Returns:
-        aged walltime
-
-    The basic formula for the walltime multiplier is:
-
-        mult = (1 - r^(n)) / (1 - r)
-
-        where r is the decay rate (fairshare_decay_factor) and n
-        is the number of fairshare_decay_time intervals that have
-        elapsed during walltime.
-        This gets further shrunk by the number of intervals that
-        have elapsed between when the walltime was sampled and now.
+        scale factor
     '''
-    global asof_time
-    global fs_decay_time, fs_decay_factor
-    state = job.get('job_state')
-    # Skip jobs still in queue
-    if state in 'HQTW':
-        return 0.0
-    walltime = job.get('resources_used.walltime')
-    if walltime is None:
-        return 0.0
-    walltime = clocktosecs(walltime)
-    asof = asof_time
-    # Jobs no longer running:
-    if state in 'FMX':
-        asof = job.get('obittime')
-        if asof is None:
-            # Guess at job end time
-            stime = job.get('stime')
-            if stime is None:
-                return 0.0
-            stime = clocktosecs(stime)
-            asof = stime + walltime
-        else:
-            asof = clocktosecs(asof)
-    (f, n) = math.modf(walltime / fs_decay_time)
-    fact = (1.0 - math.pow(fs_decay_factor, n)) / (1.0 - fs_decay_factor)
-    # Fact is factor as of last walltime update. Do further decaying if
-    # that was in the past
-    result = fs_decay_time * (f + fact)
-    if asof < gnow:
-        fact2 = math.pow(fs_decay_factor, (gnow - asof) / fs_decay_time)
-        result *= fact2
-    return result
+    # Adjust etime if needed to not exceed as-of time.
+    if etime > asof:
+        etime = asof
+    # Don't start later than finish
+    if stime > etime:
+        stime = etime
+    # We break time backward from asof into decay intervals and compute
+    # the weight of the job's usage during that interval.
+    t_end = asof
+    t_start = t_end - fs_decay_interval
+    factor = 0.0
+    scale = 1.0
+    while stime < t_end:
+        # Compute how much time the job was active in the interval
+        jb = max(stime, t_start)
+        je = min(etime, t_end)
+        used = je - jb
+        if used > 0:
+            factor += scale * used
+        scale *= fs_decay_factor
+        t_end = t_start
+        t_start -= fs_decay_interval
+    return factor
 
 
 def set_entity_name(job, patts, requestor=None):
@@ -698,6 +761,7 @@ def build_tree(fname, lines):
     Lines have the form
         (entity_name grp_id parent_name allocation)
     '''
+    global unknown_grp_id
     root = new_group(FAIRSHARE_ROOT_NAME, -1, 0)
     share_name_map['root'] = root
     for (lineno, flds) in lines:
@@ -726,10 +790,13 @@ def build_tree(fname, lines):
             return f'Unknown parent share {parent} {loc}'
         par_id = share_name_map[parent].grp_id
         share = new_group(name, par_id, grp_id)
+        if grp_id > unknown_grp_id:
+            unknown_grp_id = grp_id
         share.alloc = alloc
     # Add the unknown group at end
     unknown = new_group(UNKNOWN_GROUP_NAME, 0, 1)
     unknown.alloc = unknown_alloc
+    unknown_grp_id += 1
     result = reconcile_tree(root)
     return root
 
@@ -866,7 +933,8 @@ def write_new_usage(fname, shares):
     buf += t
     use_fmt = '50sd'
     for share in shares:
-        if share.usage <= 0.0:
+        # Write out only non-zero leaf usage
+        if share.usage <= 0.0 or share.children:
             continue
         t = struct.pack(use_fmt, bytes(share.name, 'utf-8'), share.usage)
         buf += t
@@ -916,6 +984,25 @@ def load_sched_conf(fname):
         else:
             settings[key] = value
     return settings
+
+
+def set_from_conf():
+    '''Set fairshare values from scheduler config file
+    '''
+    global fs_usage_res, fs_entity, fs_decay_interval, fs_decay_factor
+    global unknown_alloc
+    fsparam = load_sched_conf(sched_config)
+    if fsparam.get('fairshare_decay_factor'):
+        fs_decay_factor = float(fsparam['fairshare_decay_factor'])
+    if fsparam.get('fairshare_decay_time'):
+        fs_decay_interval = clocktosecs(fsparam['fairshare_decay_time'])
+    if fsparam.get('fairshare_entity'):
+        fs_entity = fsparam['fairshare_entity']
+    if fsparam.get('fairshare_usage_res'):
+        fs_usage_res = fsparam['fairshare_usage_res']
+    if fsparam.get('unknown_shares'):
+        unknown_alloc = int(fsparam['unknown_shares'])
+    return
 
 
 clockre = re.compile(r'((\d+)\+)?(\d+):(\d+)(:(\d+))?$')
