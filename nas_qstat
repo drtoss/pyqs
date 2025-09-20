@@ -809,6 +809,9 @@ def display_queues(args, fmtr):
             bs = file_to_stat(sname, 'queues')
             if bs is None:
                 rbs = ifl.pbs_statque(conn, qname, fmtr.atl, None)
+                if rbs is None:
+                    print("Unknown queue: %s" % qname, file=sys.stderr)
+                    continue
                 if rbs:
                     bs = list_from_bs(rbs)
                     ifl.pbs_statfree(rbs)
