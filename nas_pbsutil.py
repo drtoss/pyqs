@@ -12,9 +12,9 @@ import time
 import json
 
 import nas_xstat_config as conf
+pbs_conf = conf.pbs_conf
 import pbs_ifl as ifl
 from collections import OrderedDict
-from nas_conf import pbs_conf
 
 
 def get_server(job_id):

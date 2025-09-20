@@ -117,23 +117,20 @@ if check_perms():
     import socket
     import time
     from math import *
-    import pbs_ifl as ifl
-
-    try:
-        from nas_conf import *
-    except ImportError:
-        (head, tail) = os.path.split(sys.path[0])
-        t = sys.path[0]
-        if tail == 'bin':
-            t = os.path.join(head, 'lib')
-        t = os.path.join(t, os.uname().machine)
-        sys.path.insert(0, t)
-        from nas_conf import *
-    from nas_pbsutil import *
+    from nas_pbs_conf import *
+    # Examine pbs.conf to find Altair python modules (e.g., pbs_ifl)
+    t = nas_loadconf(0)
+    if not t:
+        print("Cannot get PBS configuration information", file=sys.stderr)
+        sys.exit(1)
+    import nas_xstat_config as conf
     import nas_layout as layout
     import nas_field_format
     from nas_field_format import *
+    import pbs_ifl as ifl
+    from nas_pbsutil import *
 
+pbs_conf = conf.pbs_conf
 long_desc = __doc__
 
 args = None
@@ -154,13 +151,11 @@ verbose = 0
 version = "1.0.1"
 
 conf.gNow = gNow
-conf.pbs_conf = pbs_conf
 
 # NAS hack to support -ee to invoke standard qstat
 
 if '-ee' in sys.argv:
     sys.argv.remove('-ee')
-    ifl.pbs_loadconf(0)
     path = os.path.join(pbs_conf.pbs_exec_path, 'bin', 'qstat')
     sys.argv[0] = path
     os.execv(path, sys.argv)
@@ -243,10 +238,6 @@ def main():
 
     if args.F:
         args.F = args.F.lower()
-
-    if (ifl.pbs_loadconf(0) == 0):
-        print("Cannot get PBS configuration information", file=sys.stderr)
-        return 1
 
     # Set our idea of current time, if requested.
     mo = re.search(r'cache_time=(\d+)', gdebug)
