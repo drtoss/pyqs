@@ -437,7 +437,7 @@ def fmt_fs_pct(fi, info):
 def fmt_fs_usage(fi, info):
     '''Format a share usage'''
     usage = info.usage
-    return "%.3f" % (usage / 3600.0)
+    return "%.3f" % usage
 
 
 def check_W_str(name, default=''):

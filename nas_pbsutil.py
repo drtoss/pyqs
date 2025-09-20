@@ -14,8 +14,7 @@ import json
 import nas_xstat_config as conf
 import pbs_ifl as ifl
 from collections import OrderedDict
-
-pbs_conf = ifl.cvar.pbs_conf
+from nas_conf import pbs_conf
 
 
 def get_server(job_id):
@@ -516,6 +515,54 @@ def bs_item_to_json(bs, lvl):
         json_data[cur_attrname] = cur_resclist
     t = '%s"%s":' % (pfx, item_name) + gEncoder(json_data)
     return ('\n' + pfx).join(t.split('\n'))
+
+
+def gen_from_bs(bs):
+    '''Generator to pick items off a batch_status chain
+
+    Args:
+        bs = swig result from pbs_statxxx call
+    Returns:
+        Each object in the chain as a dict of the object's attributes
+    '''
+    if bs is None:
+        return None
+    while bs:
+        name = bs.name
+        attribs = bs.attribs
+        result = dict()
+        result['id'] = name
+        while attribs:
+            aname = attribs.name
+            resource = attribs.resource
+            value = attribs.value
+            if resource:
+                a = aname + '.' + resource
+            else:
+                a = aname
+            t = result.get(a)
+            if t:
+                v = t + ',' + value
+            else:
+                v = value
+            result[a] = v
+            attribs = attribs.next
+        yield result
+        bs = bs.next
+    return None
+
+
+def list_from_bs(bs):
+    '''
+    Convert a batch_status to a list of entities & attributes
+
+    args:
+        bs = swig batch_status object as from pbs_statxxx call
+    returns:
+        status as list of dicts
+    '''
+    result = list(gen_from_bs(bs))
+    return result
 
 
 # Utility functions copied from PTL's BatchUtils class

@@ -1,0 +1,92 @@
+# Define routine to set default -W values
+
+def my_post_opts(gbl, lcl):
+    default_W = lcl['default_W']
+    default_W.extend(['NAS'])
+    default_W.extend(['sp=/home/dtalcott/work/pyqs/sp_nas'])
+
+
+userexit_post_opts = stack_userexit(userexit_post_opts, my_post_opts)
+
+
+# Set this to the fairshare_usage_res you would like to test.
+usage_res = ''
+# usage_res = 'ncpus'
+# usage_res = 'cput'
+
+
+def my_set_sbu_from_cput(job, weights):
+    '''Fake using cput as fairshare_usage_res
+
+    We don't know the actual CPU usage profile of the job, so we
+    assume the use is spread evenly over walltime.  We use this to
+    set the sbu_rate used by the rest of the code.
+    '''
+    job_state = job['job_state']
+    ncpus = job.get('Resource_List.ncpus', 0)
+    if job_state in 'HQTW':
+        # Job not started, assume it will use all requested CPUs
+        # from the beginning
+        sbu_rate = ncpus
+    elif job_state in 'RESF':
+        # Job is/was running, estimate cpu rate
+        walltime = job.get('resources_used.walltime', '0')
+        cput = job.get('resources_used.cput', '0')
+        tc = fsu.clocktosecs(cput)
+        tw = fsu.clocktosecs(walltime)
+        if tw <= 0:
+            tw = 1
+        sbu_rate = tc / tw
+    else:
+        sbu_rate = 0.0
+    job['Resource_List.sbu_rate'] = sbu_rate
+    return sbu_rate
+
+
+def my_set_sbu_from_ncpus(job, weights):
+    '''Fake using ncpus as fairshare_usage_res
+
+    The code that calls us assumes the value of fairshare_usage_res
+    changes with time (e.g., as walltime increased). This is not the
+    case for ncpus. Ncpus gets added to usage once, when the job
+    starts, and that is it.
+    '''
+    ncpus = job.get('resources_used.ncpus')
+    if ncpus is None:
+        ncpus = job.get('Resource_List.ncpus')
+        if ncpus is None:
+            ncpus = '1'
+    sbu_rate = int(ncpus)
+    job['Resource_List.sbu_rate'] = sbu_rate
+    return sbu_rate
+
+
+def my_compute_scale(stime, etime, asof):
+    '''Compute the decay factor for a one-shot usage (e.g., ncpus)
+
+    That is, work backward from the asof time to the interval in
+    which the job started, decaying for each interval passed. The
+    result is the scale factor.
+    '''
+    # Sanity checks
+    if etime > asof:
+        etime = asof
+    if stime > etime:
+        stime = etime
+    t_end = asof
+    t_start = t_end - fsu.fs_decay_interval
+    scale = 1.0
+    while stime < t_start:
+        scale *= fsu.fs_decay_factor
+        t_end = t_start
+        t_start -= fsu.fs_decay_interval
+    return scale
+
+
+if usage_res in ['cput']:
+    fsu.set_sbu_rate_nh = my_set_sbu_from_cput
+elif usage_res in ['ncpus']:
+    fsu.set_sbu_rate_nh = my_set_sbu_from_ncpus
+    fsu.compute_scale = my_compute_scale
+
+# vi:ts=4:sw=4:expandtab:syntax=python

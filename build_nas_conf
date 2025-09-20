@@ -6,7 +6,8 @@ source /etc/pbs.conf
 PATH=~dtalcott/swig/bin:$PATH
 # Point repo at sources used to build current pbs_python
 repo=~dtalcott/work/drtoss
-defs="-DNAS"
+repo=~dtalcott/work/2024.1.3/pbspro
+defs=""
 
 # Extract pieces needed to define pbs_conf structure
 
@@ -17,7 +18,7 @@ defs="-DNAS"
 	sed -e 's/psi_t/void/'
 ) > my_pbsconf.h
 
-swig -python -I${repo}/src/include ${defs} ./pbs_ifl.i
+swig -python -I${repo}/src/include ${defs} ./nas_conf.i
 
 t=$(pbs_python --version)
 version=${t#pbs_version = }
@@ -27,10 +28,10 @@ gcc -g -O0 -Wall -Wno-unused-variable -fPIC -shared \
 	$pyinc \
 	-D PBS_VERSION='"'$version'"' \
 	${defs} \
-	-L ${PBS_EXEC}/lib \
+	-L /PBS/lib \
 	-lpbs \
-	-Wl,-rpath=${PBS_EXEC}/lib \
-	-o _pbs_ifl.so \
-	./pbs_ifl_wrap.c
+	-Wl,-rpath=/PBS/lib \
+	-o _nas_conf.so \
+	./nas_conf_wrap.c
 
-ldd _pbs_ifl.so
+ldd _nas_conf.so

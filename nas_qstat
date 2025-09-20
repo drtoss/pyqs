@@ -21,6 +21,9 @@ def check_perms():
     # First, clean up python search path by removing
     # dodgy entries.
     newp = []
+    # XXX Need a better way to find installed PBS
+    for x in ['/opt/pbs', '/PBS']:
+        sys.path.append(x + '/lib/python/altair')
     for x in sys.path:
         if x == '':
             continue
@@ -114,9 +117,10 @@ if check_perms():
     import socket
     import time
     from math import *
+    import pbs_ifl as ifl
 
     try:
-        import pbs_ifl as ifl
+        from nas_conf import *
     except ImportError:
         (head, tail) = os.path.split(sys.path[0])
         t = sys.path[0]
@@ -124,7 +128,7 @@ if check_perms():
             t = os.path.join(head, 'lib')
         t = os.path.join(t, os.uname().machine)
         sys.path.insert(0, t)
-        import pbs_ifl as ifl
+        from nas_conf import *
     from nas_pbsutil import *
     import nas_layout as layout
     import nas_field_format
@@ -147,10 +151,10 @@ gshare_entity_info = dict()
 host_re = None
 opts_W = list()
 verbose = 0
-version = "0.3"
+version = "1.0.1"
 
 conf.gNow = gNow
-conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
+conf.pbs_conf = pbs_conf
 
 # NAS hack to support -ee to invoke standard qstat
 
@@ -575,9 +579,9 @@ def display_jobs(args, fmtr):
         if bs is None:
             namelist = ','.join(names)
             if sel_attr:
-                bs = ifl.pbs_selstat(conn, sel_attr, fmtr.atl, extend)
+                rbs = ifl.pbs_selstat(conn, sel_attr, fmtr.atl, extend)
             else:
-                bs = ifl.pbs_statjob(conn, namelist, fmtr.atl, extend)
+                rbs = ifl.pbs_statjob(conn, namelist, fmtr.atl, extend)
             err = ifl.get_pbs_errno()
             if err:
                 errcnt += 1
@@ -586,7 +590,10 @@ def display_jobs(args, fmtr):
                     errmsg = "error %d" % err
                 errmsg += ': ' + namelist
                 print(errmsg, file=sys.stderr)
+                ifl.pbs_statfree(rbs)
                 continue
+            bs = list_from_bs(rbs)
+            ifl.pbs_statfree(rbs)
         if gNAS:
             plug_job_info(bs)
         if gAltairFS:
@@ -777,7 +784,10 @@ def display_queues(args, fmtr):
                       os.strerror(ifl.get_pbs_errno()),
                       file=sys.stderr)
                 return 1
-            bs = ifl.pbs_statque(conn, '', fmtr.atl, None)
+            rbs = ifl.pbs_statque(conn, '', fmtr.atl, None)
+            if rbs:
+                bs = list_from_bs(rbs)
+                ifl.pbs_statfree(rbs)
             ifl.pbs_disconnect(conn)
         sinfo.append((sname.split('.')[0], bs))
     else:
@@ -807,8 +817,11 @@ def display_queues(args, fmtr):
                 prev = sname
             bs = file_to_stat(sname, 'queues')
             if bs is None:
-                bs = ifl.pbs_statque(conn, qname, fmtr.atl, None)
-            if len(bs) == 0:
+                rbs = ifl.pbs_statque(conn, qname, fmtr.atl, None)
+                if rbs:
+                    bs = list_from_bs(rbs)
+                    ifl.pbs_statfree(rbs)
+            if bs is None or len(bs) == 0:
                 continue
             if new_svr:
                 sinfo.append((sname.split('.')[0], bs))
@@ -918,9 +931,12 @@ def display_servers(args, fmtr):
                   os.strerror(ifl.get_pbs_errno()),
                   file=sys.stderr)
             return 1
-        bs = ifl.pbs_statserver(conn, fmtr.atl, None)
+        rbs = ifl.pbs_statserver(conn, fmtr.atl, None)
         ifl.pbs_disconnect(conn)
-        info.extend(bs)
+        if rbs:
+            bs = list_from_bs(rbs)
+            ifl.pbs_statfree(rbs)
+            info.extend(bs)
     else:
         prev = None
         conn = -1
@@ -936,10 +952,13 @@ def display_servers(args, fmtr):
                     prev = None
                     continue
                 prev = thing
-            bs = ifl.pbs_statserver(conn, fmtr.atl, None)
-            if len(bs) == 0:
-                continue
-            info.extend(bs)
+            rbs = ifl.pbs_statserver(conn, fmtr.atl, None)
+            if rbs:
+                bs = list_from_bs(rbs)
+                ifl.pbs_statfree(rbs)
+                if not bs:
+                    continue
+                info.extend(bs)
         if conn != -1:
             ifl.pbs_disconnect(conn)
     if args.f:
@@ -983,8 +1002,11 @@ def cache_server(server, conn):
         return gserver_info[sname]
     bs = file_to_stat(sname, 'server')
     if bs is None:
-        bs = ifl.pbs_statserver(conn, None, None)
-    info = bs[0]
+        rbs = ifl.pbs_statserver(conn, None, None)
+        if rbs:
+            bs = list_from_bs(rbs)
+            ifl.pbs_statfree(rbs)
+    info = bs[0] if bs else None
     gserver_info[sname] = info
     if info is None:
         return info
@@ -993,7 +1015,10 @@ def cache_server(server, conn):
     resv_info = file_to_stat(sname, 'resvs', atrs)
     if resv_info is None:
         atrl = list_to_attrl(atrs)
-        resv_info = ifl.pbs_statresv(conn, None, atrl, None)
+        rbs = ifl.pbs_statresv(conn, None, atrl, None)
+        if rbs:
+            resv_info = list_from_bs(rbs)
+            ifl.pbs_statfree(rbs)
     info['resv_info'] = resv_info
     return info
 
@@ -1153,7 +1178,10 @@ def display_server_hdr(server, conn, args, opts_W):
             mom_info = file_to_stat(sname, 'vnodes', attr_list)
             if mom_info is None:
                 if conn is not None:
-                    mom_info = ifl.pbs_statvnode(conn, None, atl, None)
+                    rbs = ifl.pbs_statvnode(conn, None, atl, None)
+                    if rbs:
+                        mom_info = list_from_bs(rbs)
+                        ifl.pbs_statfree(rbs)
             # Condense vnode info into natural vnodes if desired
             cv = check_W_str('condense_vnodes', '')
             cvhosts = re.split(r'[\s,]+', cv)
@@ -1923,13 +1951,17 @@ def plug_fs_info(bs, sname, conn):
     fsu.reconcile_usage(fs_tree)
 
     # Get job sort formula
+    formula = None
     if fsu.formula_file is not None:
         with open(fsu.formula_file) as fs:
             formula = fs.read()
     else:
-        sbs = ifl.pbs_statserver(conn, None, None)
-        if sbs:
-            formula = sbs[0].get('job_sort_formula')
+        rbs = ifl.pbs_statserver(conn, None, None)
+        if rbs:
+            sbs = list_from_bs(rbs)
+            ifl.pbs_statfree(rbs)
+            if sbs:
+                formula = sbs[0].get('job_sort_formula')
     if formula == '' or formula is None:
         formula = '0'
     compiled = compile(formula, '<string>', 'eval')
@@ -1937,7 +1969,10 @@ def plug_fs_info(bs, sname, conn):
     qbs = file_to_stat(sname, 'queues')
     qinfo = dict()
     if not qbs:
-        qbs = ifl.pbs_statque(conn, '', None, None)
+        rbs = ifl.pbs_statque(conn, '', None, None)
+        if rbs:
+            qbs = list_from_bs(rbs)
+            ifl.pbs_statfree(rbs)
     if not qbs:
         print(f'No queue info for host {sname}', file=sys.stderr)
     else:
