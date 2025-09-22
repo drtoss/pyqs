@@ -12,10 +12,7 @@ widths for individual fields.
 
 Now, however, Altair wants to remove the TCL option from qstat to simplify
 maintenance. This is going to be disruptive for NAS users. So, I have
-been working on a python version of qstat. If there is enough interest,
-I’ll propose adding it to the unsupported portion of OpenPBS. Having
-a user-customizable version of qstat could reduce demand for yet more
-features in the base qstat.
+been working on a python version of qstat.
 
 (I considered a script that starts with qstat -f -F json output, but
 rejected it as too inefficient. Also, qstat -f grabs all info about a
@@ -111,11 +108,7 @@ JobID      User     Queue Jobname        TSK Nds wallt S wallt Eff
 It’s tricky, but admins and users can add new fields (perhaps computed
 on the fly) without modifying the base code.
 
-So, if you are interested, you can fetch the work in progress
-here. For now, you’ll need to modify the ‘build\_pbs\_ifl’ script to tell
-it where to find swig and where to find the OpenPBS source tree. This
-script builds the pbs\_ifl module to give python access to PBS's IFL
-routines.
+So, if you are interested, you can fetch the work in progress here.
 
 Pieces:
 * example\_new\_field -- Example defining new field for nas\_qstat (in this case, expansion factor)
@@ -125,37 +118,31 @@ Pieces:
 * nas\_layout.py -- The layout engine that handles field justification, widths, headers, etc.
 * nas\_pbsfs -- Python command to display fairshare information
 * nas\_pbsfs.8 -- Man page for nasi\_pbsfs
-* nas\_pbsutil.py -- Interfaces to PBS not supplied by pbs\_ifl.i
+* nas\_pbsutil.py -- Interfaces to PBS not supplied by pbs\_ifl
 * nas\_qstat -- Main routine of python qstat
 * nas\_qstat.1 -- Man page for nas\_qstat
 * nas\_qstat\_userexits.3 -- Man page for nas\_qstat user exit callouts
 * nas\_rstat -- Python version of pbs\_rstat (used as prototype for nas\_qstat)
 * nas\_xstat\_config.py -- Global variables for nas\_qstat and nas\_rstat
-* pbs\_ifl.i -- Slightly modified version of OpenPBS's swig input file to build pbs\_ifl module
 * qstat\_fs\_exits -- Example site userexits for adding fairshare info to nas\_qstat
 * qstat\_userexits -- Example site userexits, including GPU handling
 
-The build\_pbs\_ifl script creates these files:
-* pbs\_ifl.py -- Python module for access to PBS IFL library
-* \_pbs\_ifl.so -- Loadable code for pbs\_ifl.py
-
-I am particularly interested in suggestions for code speedups. For
-example, on the host with 38k jobs (active and in history), OpenPBS
-qstat takes 0.75 second, whereas python qstat takes 2.5 seconds. (The
-TCL qstat takes ~20 seconds, so this version is already better than what
-NAS has been using.)
-
 # INSTALLATION #
+For testing, you can run nas\_qstat, nas\_rstat, and nas\_pbsfs directly
+from the source directory. Or, you can create a tar to unpack whereever
+you want them installed.
+
 Assume you want to install this under PBS\_EXEC/unsupported.  Run
 ```
  ./make_tar.sh
 ```
 It creates a dummy install directory in TMPDIR and then tars that up
 into nas\_qstat.tgz.  You can install that where you want. For example,
-to install in $PBS\_EXEC/unsupported/, run (as root)
+to install in PBS\_EXEC/unsupported/, run (as root)
 
 ```
- tar -C PBS_EXEC/unsupported -xzf nas_qstat.tgz
+ source /etc/pbs.conf
+ tar -C $PBS_EXEC/unsupported -xzf nas_qstat.tgz
 ```
 You will want to edit PBS\_EXEC/unsupported/lib/site/qstat\_userexits to
 suit your local site. Or remove it entirely to get default nas\_qstat 

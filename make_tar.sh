@@ -14,10 +14,9 @@ ln -s ../../nas_pbsfs bin/
 ln -s ../../nas_qstat bin/
 ln -s ../../nas_rstat bin/
 ln -s ../../nas_field_format.py lib/
-ln -s ../../nas_conf.py lib/
-ln -s ../../_nas_conf.so lib/
 ln -s ../../nas_fsutil.py lib/
 ln -s ../../nas_layout.py lib/
+ln -s ../../nas_pbs_conf.py lib/
 ln -s ../../nas_pbsutil.py lib/
 ln -s ../../nas_xstat_config.py lib/
 ln -s ../../qstat_userexits lib/

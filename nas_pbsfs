@@ -118,22 +118,18 @@ if check_perms():
     from sys import stdin, stdout, stderr
     import nas_fsutil as fsu
     from nas_fsutil import share_id_map, share_name_map
+    from nas_pbs_conf import *
+    # Examine pbs.conf to find Altair python modules (e.g., pbs_ifl)
+    t = nas_loadconf(0)
+    if not t:
+        print("Cannot get PBS configuration information", file=sys.stderr)
+        sys.exit(1)
     import nas_xstat_config as conf
-    try:
-        import pbs_ifl as ifl
-    except ImportError:
-        (head, tail) = os.path.split(sys.path[0])
-        t = sys.path[0]
-        if tail == 'bin':
-            t = os.path.join(head, 'lib')
-        t = os.path.join(t, os.uname().machine)
-        print(t)
-        sys.path.insert(0, t)
-        import pbs_ifl as ifl
-    from nas_pbsutil import *
     import nas_layout as layout
     import nas_field_format
     from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
+    import pbs_ifl as ifl
+    from nas_pbsutil import *
 
 
 long_desc = __doc__
@@ -196,10 +192,7 @@ def main():
     conf.verbose = verbose = args.verbose
     conf.gdebug = gdebug = ' '.join(args.debug)
 
-    if (ifl.pbs_loadconf(0) == 0):
-        print("Cannot get PBS configuration information", file=sys.stderr)
-        return 1
-    conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
+    pbs_conf = conf.pbs_conf
     set_paths(pbs_conf)
     if args.convert:
         if not args.job_file:

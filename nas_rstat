@@ -114,26 +114,23 @@ if check_perms():
     import subprocess
     import time
 
+    from nas_pbs_conf import *
+    # Examine pbs.conf to find Altair python modules (e.g., pbs_ifl)
+    t = nas_loadconf(0)
+    if not t:
+        print("Cannot get PBS configuration information", file=sys.stderr)
+        sys.exit(1)
     import nas_xstat_config as conf
-    try:
-        import pbs_ifl as ifl
-    except ImportError:
-        (head, tail) = os.path.split(sys.path[0])
-        t = sys.path[0]
-        if tail == 'bin':
-            t = os.path.join(head, 'lib')
-        t = os.path.join(t, os.uname().machine)
-        sys.path.insert(0, t)
-        import pbs_ifl as ifl
-    from nas_pbsutil import *
     import nas_layout as layout
     import nas_field_format
-    from nas_field_format import NAS_field_format, gen_field, define_on_the_fly
+    from nas_field_format import *
+    import pbs_ifl as ifl
+    from nas_pbsutil import *
 
 long_desc = __doc__
 gdebug = []
-conf.pbs_conf = pbs_conf = ifl.cvar.pbs_conf
-version = "0.2.3"
+pbs_conf = conf.pbs_conf
+version = "1.0.1"
 
 
 def main():
@@ -173,10 +170,6 @@ def main():
     conf.verbose = verbose = args.verbose
     conf.gdebug = gdebug = ' '.join(args.debug)
 
-    if (ifl.pbs_loadconf(0) == 0):
-        print("Cannot get PBS configuration information", file=sys.stderr)
-        return 1
-
     default_fields = ['name', 'queue', 'user', 'states', 'start', 'duration',
                       'end']
     conf.verbose = args.verbose
@@ -199,9 +192,6 @@ def main():
     if args.B:
         default_fields = ['name']
     conf.opts_W = opts_W
-    if (ifl.pbs_loadconf(0) == 0):
-        print("Cannot get PBS configuration information", file=sys.stderr)
-        return 1
     # Load possible user or system overrides
     more_code = load_userexits('rstat')
     if more_code:
@@ -398,7 +388,10 @@ def get_resv_info(resvids, attr_list):
                       os.strerror(ifl.get_pbs_errno()),
                       file=sys.stderr)
                 return None
-            bs = ifl.pbs_statresv(conn, None, atl, None)
+            rbs = ifl.pbs_statresv(conn, None, atl, None)
+            if rbs:
+                bs = list_from_bs(rbs)
+                ifl.pbs_statfree(rbs)
     else:
         cur_server = None
         for resid in resvids:
@@ -420,7 +413,10 @@ def get_resv_info(resvids, attr_list):
                               (server, os.strerror(ifl.get_pbs_errno())))
                         break
                     cur_server = server
-                bs1 = ifl.pbs_statresv(conn, seq_no, atl, None)
+                rbs = ifl.pbs_statresv(conn, seq_no, atl, None)
+                if rbs:
+                    bs1 = list_from_bs(rbs)
+                    ifl.pbs_statfree(rbs)
             if conf.verbose > 1:
                 print(bs1)
             bs.extend(bs1)
