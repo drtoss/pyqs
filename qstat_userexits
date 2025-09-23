@@ -7,7 +7,7 @@
 # queues, or jobs
 if args.B:
     pass
-elif args.Q:
+elif args.Q or args.q:
     pass
 else:
     # We add ngpus to default field list, if not already there
@@ -25,6 +25,7 @@ else:
         default_W.extend(['node_detail', 'model'])
         default_W.extend(['fmt_jobname=maxw:20 hj:e ht:...'])
         default_W.extend(['condense_vnodes=pbspl4,server2'])
+        default_W.extend(['field_aliases=ngpus:gpus,ncpus:cpus'])
 
     userexit_post_opts = stack_userexit(userexit_post_opts, site_post_opts)
 

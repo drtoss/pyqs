@@ -77,7 +77,8 @@ def set_fs_info(*lst, **kwds):
         ua = unknown_alloc (float)
         uf = usage_file path
     '''
-    global shost, fs_decay_factor, fs_decay_interval, groups_file, unknown_alloc
+    global shost, fs_decay_factor, fs_decay_interval, groups_file
+    global unknown_alloc
     global usage_file, trust_job_info, gnow, asof_time, nas_shares_file
     global sched_priv, sched_config, formula_file
     args = dict(lst)
@@ -958,7 +959,7 @@ def load_sched_conf(fname):
         with open(fname) as fs:
             buf = fs.read()
     except IOError:
-        return "Unable to read config file" + fname
+        return "Unable to read config file " + fname
     settings = dict()
     lineno = 0
     for line in buf.splitlines():
@@ -992,6 +993,9 @@ def set_from_conf():
     global fs_usage_res, fs_entity, fs_decay_interval, fs_decay_factor
     global unknown_alloc
     fsparam = load_sched_conf(sched_config)
+    if isinstance(fsparam, str):
+        print(fsparam, file=sys.stderr)
+        sys.exit(1)
     if fsparam.get('fairshare_decay_factor'):
         fs_decay_factor = float(fsparam['fairshare_decay_factor'])
     if fsparam.get('fairshare_decay_time'):

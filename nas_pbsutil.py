@@ -12,9 +12,10 @@ import time
 import json
 
 import nas_xstat_config as conf
-pbs_conf = conf.pbs_conf
 import pbs_ifl as ifl
 from collections import OrderedDict
+
+pbs_conf = conf.pbs_conf
 
 
 def get_server(job_id):
@@ -150,6 +151,8 @@ def file_to_stat(host, stat, attrs=[]):
             cur = cur.next
     with open(fname) as fd:
         lines = fd.read()
+        if not lines:
+            return list()
         bs = lines_to_stat(lines, attrs if lst is None else lst)
     return bs
 
@@ -167,6 +170,8 @@ def lines_to_stat(lines, attrs=[]):
     item = None
     line_cnt = 0
     attrset = set(attrs)
+    if lines[0] == '{':
+        return json_to_stat(lines, attrset)
     for line in lines.split('\n'):
         line_cnt += 1
         if line == '':
@@ -201,6 +206,54 @@ def lines_to_stat(lines, attrs=[]):
     if item:
         item_list.append(item)
     return item_list
+
+
+def json_to_stat(lines, attrset):
+    '''Convert info in JSON format to batch status
+
+    Args:
+        lines = contents of file to convert
+        attrset = set giving names of attributes to include
+            Use None to include all attributes
+    '''
+    info = json.loads(lines)
+    if not info:
+        return list()
+    for (k, stuff) in info.items():
+        # Skip to the good stuff
+        if isinstance(stuff, dict):
+            break
+    bs = list()
+    for (reqid, value) in stuff.items():
+        job = dict()
+        job['id'] = reqid
+        for (aname, avalue) in value.items():
+            if isinstance(avalue, dict):
+                # Merge Variable list into one string
+                if aname == 'Variable_List':
+                    rvalue = list()
+                    for (x, v) in avalue.items():
+                        if not isinstance(v, str):
+                            v = str(v)
+                        rvalue.append(x + '=' + v)
+                    rvalue = ','.join(rvalue)
+                    job[aname] = rvalue
+                    continue
+                for (rname, rvalue) in avalue.items():
+                    if not isinstance(rvalue, str):
+                        rvalue = str(rvalue)
+                    job[aname + '.' + rname] = rvalue
+            elif not isinstance(avalue, str):
+                job[aname] = str(avalue)
+            elif aname.endswith('time') and ' ' in avalue:
+                # Convert text times to epoch seconds
+                t = time.strptime(avalue)
+                avalue = str(int(time.mktime(t)))
+                job[aname] = avalue
+            else:
+                job[aname] = avalue
+        bs.append(job)
+    return bs
 
 
 def load_userexits(prefix):

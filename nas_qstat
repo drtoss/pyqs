@@ -922,11 +922,14 @@ def display_servers(args, fmtr):
                   os.strerror(ifl.get_pbs_errno()),
                   file=sys.stderr)
             return 1
-        rbs = ifl.pbs_statserver(conn, fmtr.atl, None)
-        ifl.pbs_disconnect(conn)
-        if rbs:
-            bs = list_from_bs(rbs)
-            ifl.pbs_statfree(rbs)
+        bs = file_to_stat(pbs_conf.pbs_server_name, 'server', fmtr.atl)
+        if bs is None:
+            rbs = ifl.pbs_statserver(conn, fmtr.atl, None)
+            if rbs:
+                bs = list_from_bs(rbs)
+                ifl.pbs_statfree(rbs)
+            ifl.pbs_disconnect(conn)
+        if bs:
             info.extend(bs)
     else:
         prev = None
@@ -943,13 +946,15 @@ def display_servers(args, fmtr):
                     prev = None
                     continue
                 prev = thing
-            rbs = ifl.pbs_statserver(conn, fmtr.atl, None)
-            if rbs:
-                bs = list_from_bs(rbs)
-                ifl.pbs_statfree(rbs)
-                if not bs:
-                    continue
-                info.extend(bs)
+            bs = file_to_stat(thing, 'server', fmtr.atl)
+            if bs is None:
+                rbs = ifl.pbs_statserver(conn, fmtr.atl, None)
+                if rbs:
+                    bs = list_from_bs(rbs)
+                    ifl.pbs_statfree(rbs)
+            if not bs:
+                continue
+            info.extend(bs)
         if conn != -1:
             ifl.pbs_disconnect(conn)
     if args.f:
@@ -1947,12 +1952,14 @@ def plug_fs_info(bs, sname, conn):
         with open(fsu.formula_file) as fs:
             formula = fs.read()
     else:
-        rbs = ifl.pbs_statserver(conn, None, None)
-        if rbs:
-            sbs = list_from_bs(rbs)
-            ifl.pbs_statfree(rbs)
-            if sbs:
-                formula = sbs[0].get('job_sort_formula')
+        sbs = file_to_stat(sname, 'server', [])
+        if sbs is None:
+            rbs = ifl.pbs_statserver(conn, None, None)
+            if rbs:
+                sbs = list_from_bs(rbs)
+                ifl.pbs_statfree(rbs)
+        if sbs:
+            formula = sbs[0].get('job_sort_formula')
     if formula == '' or formula is None:
         formula = '0'
     compiled = compile(formula, '<string>', 'eval')
