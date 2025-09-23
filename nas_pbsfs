@@ -134,7 +134,7 @@ if check_perms():
 
 long_desc = __doc__
 gdebug = ''
-version = "0.2"
+version = "1.0.1"
 opts_W = list()
 
 
